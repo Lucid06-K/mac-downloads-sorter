@@ -118,9 +118,9 @@ ok "Loaded and enabled the sorter"
 # 5) convenience alias ------------------------------------------------------
 RC=""
 case "${SHELL##*/}" in zsh) RC="$HOME/.zshrc" ;; bash) RC="$HOME/.bashrc" ;; esac
-if [ -n "$RC" ] && ! grep -q "alias downloads-sorter=" "$RC" 2>/dev/null; then
-    printf '\nalias downloads-sorter="%s"\n' "$CTL" >> "$RC"
-    ok "Added 'downloads-sorter' alias to ${RC/#$HOME/~} (restart your shell to use it)"
+if [ -n "$RC" ] && ! grep -q "alias dsort=" "$RC" 2>/dev/null; then
+    printf '\n# Downloads Sorter — tidy ~/Downloads, open the menu + all commands\nalias dsort="%s"\n' "$CTL" >> "$RC"
+    ok "Added 'dsort' alias to ${RC/#$HOME/~} (restart your shell, then run: dsort)"
 fi
 
 # 6) permission prompts -----------------------------------------------------
@@ -138,7 +138,7 @@ sleep 1
 echo
 bold "Done."
 info "If you didn't see the Downloads prompt, drop a test file in ~/Downloads and run:"
-info "    \"$CTL\" run     (or just: downloads-sorter run)"
-info "Open the menu any time with:  downloads-sorter        (or: \"$CTL\")"
-info "Full guide:  downloads-sorter  → Help & guide"
+info "    \"$CTL\" run     (or just: dsort run)"
+info "Open the menu any time with:  dsort        (or: \"$CTL\")"
+info "Full guide:  dsort  → Help & guide"
 info "Uninstall:   ./uninstall.sh"

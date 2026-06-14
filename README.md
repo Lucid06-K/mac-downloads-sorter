@@ -35,7 +35,7 @@ macOS protects your folders and notifications, so during install you'll see **tw
 
 These are granted to the small helper apps the installer builds on your Mac (`OrganizeDownloads.app` and `DownloadsNotifier.app`). They can't be shipped pre‑approved — macOS ties permissions to each app's identity on each machine — which is exactly why the installer builds them locally.
 
-> If you miss the Downloads prompt, just drop any file in `~/Downloads` and run `downloads-sorter run`; macOS will ask then. You can always check under **System Settings → Privacy & Security → Files and Folders**.
+> If you miss the Downloads prompt, just drop any file in `~/Downloads` and run `dsort run`; macOS will ask then. You can always check under **System Settings → Privacy & Security → Files and Folders**.
 
 ---
 
@@ -67,7 +67,7 @@ Only **loose files at the top of `~/Downloads`** are sorted. **Any folder you cr
 Open the menu:
 
 ```sh
-downloads-sorter
+dsort
 ```
 
 It has two screens — a compact **main menu** and a **Settings** submenu:
@@ -95,31 +95,33 @@ Navigate with **↑/↓ + Enter**, or press a **number (1‑9)** to jump straigh
 Everything the menu does is scriptable:
 
 ```sh
-downloads-sorter                 # open the menu
-downloads-sorter status          # show every current setting
-downloads-sorter run             # sort now
-downloads-sorter preview         # dry run — show where things would go (moves nothing)
-downloads-sorter undo            # move the last run's files back
-downloads-sorter stats           # counts + sizes per category
-downloads-sorter rules           # list your custom rules
-downloads-sorter log [n]         # recent activity
+dsort                 # open the menu
+dsort status          # show every current setting
+dsort run             # sort now
+dsort preview         # dry run — show where things would go (moves nothing)
+dsort undo            # move the last run's files back
+dsort stats           # counts + sizes per category
+dsort rules           # list your custom rules
+dsort log [n]         # recent activity
 
 # toggles
-downloads-sorter notify on|off
-downloads-sorter cleannames on|off
-downloads-sorter aging on|off
-downloads-sorter duplicates on|off
-downloads-sorter screenshotdate on|off
-downloads-sorter metanames on|off
-downloads-sorter autounzip on|off
+dsort notify on|off
+dsort cleannames on|off
+dsort aging on|off
+dsort duplicates on|off
+dsort screenshotdate on|off
+dsort metanames on|off
+dsort autounzip on|off
 
 # tunables (r = recommended)
-downloads-sorter interval [seconds|r]
-downloads-sorter archivedays [days|r]
-downloads-sorter largefiles [GB|r]     # 0 = off
+dsort interval [seconds|r]
+dsort archivedays [days|r]
+dsort largefiles [GB|r]     # 0 = off
 
-downloads-sorter on|off          # enable/disable the whole sorter
+dsort on|off          # enable/disable the whole sorter
 ```
+
+> `dsort` is the command the installer sets up (an alias to the `downloads-sorter` script in `~/Library/Scripts`).
 
 ---
 
@@ -152,7 +154,7 @@ Create `~/.downloads-rules.conf` to override the built‑in categories:
 *figma*             -> Design
 ```
 
-The arrow may be `->` or `→`; `#` lines are comments. Rules are checked **before** the built‑in categories. List them with `downloads-sorter rules`.
+The arrow may be `->` or `→`; `#` lines are comments. Rules are checked **before** the built‑in categories. List them with `dsort rules`.
 
 ---
 

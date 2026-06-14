@@ -1,15 +1,15 @@
 #!/bin/bash
-# downloads-sorter — control the com.tonnam.organize-downloads launchd agent.
+# dsort — control the com.downloads-sorter.agent launchd agent.
 #
 # Run bare for an interactive UI (arrow keys + enter, or s/n/r/l/q shortcuts).
 # Scriptable subcommands:
-#   downloads-sorter on|off          enable/disable the sorter (persists across restarts)
-#   downloads-sorter status          one-shot text status
-#   downloads-sorter run             trigger a sort pass now
-#   downloads-sorter log [n]         last n log lines (default 15)
-#   downloads-sorter notify on|off   toggle "Downloads sorted" notifications
-#   downloads-sorter cleannames on|off   toggle opt-in filename cleanup
-#   downloads-sorter interval [secs]     show/set the safety-net auto-run interval
+#   dsort on|off          enable/disable the sorter (persists across restarts)
+#   dsort status          one-shot text status
+#   dsort run             trigger a sort pass now
+#   dsort log [n]         last n log lines (default 15)
+#   dsort notify on|off   toggle "Downloads sorted" notifications
+#   dsort cleannames on|off   toggle opt-in filename cleanup
+#   dsort interval [secs]     show/set the safety-net auto-run interval
 #
 # The sorter itself lives in organize_downloads.sh next to this file.
 
@@ -161,7 +161,7 @@ show_status() {
     meta_is_on  && echo "Metadata naming (PDF titles): ON" || echo "Metadata naming: OFF (opt-in)"
     unzip_is_on && echo "Auto-unzip (.zip): ON" || echo "Auto-unzip: OFF (opt-in)"
     if [ -r "$HOME/.downloads-rules.conf" ]; then
-        echo "Custom rules: $(grep -vE '^[[:space:]]*#' "$HOME/.downloads-rules.conf" | grep -cE '\->|→') active (downloads-sorter rules)"
+        echo "Custom rules: $(grep -vE '^[[:space:]]*#' "$HOME/.downloads-rules.conf" | grep -cE '\->|→') active (dsort rules)"
     else echo "Custom rules: none (~/.downloads-rules.conf)"; fi
     echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — recommended every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
     echo "Archive age: $ad days — recommended $RECOMMENDED_ARCHIVE_DAYS"
@@ -617,7 +617,7 @@ help_text() {
        *statement*   -> Documents/Finance
        *.dwg         -> 3D & CAD
    (the arrow can be -> or →). These override the built-in categories.
-   See them anytime with:   downloads-sorter rules
+   See them anytime with:   dsort rules
 
   SAFETY
    • Never deletes or overwrites — uses a no-clobber move and adds
@@ -628,15 +628,15 @@ help_text() {
    • Every tunable shows a recommended value next to it.
 
   COMMAND LINE (everything the menu does, scriptable)
-   downloads-sorter                 open this menu
-   downloads-sorter status          show every current setting
-   downloads-sorter run | preview | undo | stats | rules
-   downloads-sorter notify|cleannames|aging|duplicates on|off
-   downloads-sorter screenshotdate|metanames|autounzip on|off
-   downloads-sorter interval [seconds|r]      (r = recommended)
-   downloads-sorter archivedays [days|r]
-   downloads-sorter largefiles [GB|r]         (0 = off)
-   downloads-sorter on | off        enable/disable the whole sorter
+   dsort                 open this menu
+   dsort status          show every current setting
+   dsort run | preview | undo | stats | rules
+   dsort notify|cleannames|aging|duplicates on|off
+   dsort screenshotdate|metanames|autounzip on|off
+   dsort interval [seconds|r]      (r = recommended)
+   dsort archivedays [days|r]
+   dsort largefiles [GB|r]         (0 = off)
+   dsort on | off        enable/disable the whole sorter
 
   GETTING AROUND THIS MENU
    ↑/↓ to move, Enter to choose, or press a number (1-9) to jump
@@ -722,7 +722,7 @@ case "$1" in
         echo "Downloads sorter: ON" ;;
     off)
         sorter_off
-        echo "Downloads sorter: OFF (stays off until you run: downloads-sorter on)" ;;
+        echo "Downloads sorter: OFF (stays off until you run: dsort on)" ;;
     run)
         launchctl kickstart "$TARGET" && echo "Sort pass triggered." ;;
     log)
@@ -815,7 +815,7 @@ case "$1" in
         if [ -t 0 ] && [ -t 1 ]; then ui_main; else show_status; fi ;;
     *)
         cat >&2 <<'USAGE'
-Usage: downloads-sorter <command>   (bare = interactive UI)
+Usage: dsort <command>   (bare = interactive UI)
   on | off            enable/disable the sorter
   status              text status of every setting
   run                 trigger a sort pass now
