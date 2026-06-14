@@ -1,0 +1,839 @@
+#!/bin/bash
+# downloads-sorter — control the com.tonnam.organize-downloads launchd agent.
+#
+# Run bare for an interactive UI (arrow keys + enter, or s/n/r/l/q shortcuts).
+# Scriptable subcommands:
+#   downloads-sorter on|off          enable/disable the sorter (persists across restarts)
+#   downloads-sorter status          one-shot text status
+#   downloads-sorter run             trigger a sort pass now
+#   downloads-sorter log [n]         last n log lines (default 15)
+#   downloads-sorter notify on|off   toggle "Downloads sorted" notifications
+#   downloads-sorter cleannames on|off   toggle opt-in filename cleanup
+#   downloads-sorter interval [secs]     show/set the safety-net auto-run interval
+#
+# The sorter itself lives in organize_downloads.sh next to this file.
+
+LABEL="com.downloads-sorter.agent"
+TARGET="gui/$(id -u)/$LABEL"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/organize-downloads.log"
+NONOTIFY_FLAG="$HOME/Library/Scripts/organize_downloads.nonotify"
+CLEANFLAG="$HOME/Library/Scripts/organize_downloads.cleannames"
+AGEFILE="$HOME/Library/Scripts/organize_downloads.archivedays"
+AGING_FLAG="$HOME/Library/Scripts/organize_downloads.noaging"
+DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
+LFFILE="$HOME/Library/Scripts/organize_downloads.largefilegb"
+SS_FLAG="$HOME/Library/Scripts/organize_downloads.noscreenshotdate"
+META_FLAG="$HOME/Library/Scripts/organize_downloads.metanames"
+AUTOUNZIP_FLAG="$HOME/Library/Scripts/organize_downloads.autounzip"
+UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
+SORTER="$HOME/Library/Scripts/organize_downloads.sh"
+RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
+RECOMMENDED_ARCHIVE_DAYS=30     # sweep files older than this into Archive/
+RECOMMENDED_LARGEFILE_GB=5      # files >= this go to Large Files/ for review
+
+R=$'\033[0m'; REV=$'\033[7m'; DIM=$'\033[2m'; GRN=$'\033[32m'; BLD=$'\033[1m'; YEL=$'\033[33m'
+
+is_loaded()    { launchctl print "$TARGET" >/dev/null 2>&1; }
+notify_is_on() { [ ! -e "$NONOTIFY_FLAG" ]; }
+clean_is_on()  { [ -e "$CLEANFLAG" ]; }
+aging_is_on()  { [ ! -e "$AGING_FLAG" ]; }   # weekly Archive nudge, default ON
+dedup_is_on()  { [ ! -e "$DEDUP_FLAG" ]; }   # duplicates -> Duplicates/, default ON
+ss_is_on()     { [ ! -e "$SS_FLAG" ]; }      # screenshot date-prefix + buckets, default ON
+meta_is_on()   { [ -e "$META_FLAG" ]; }      # PDF metadata naming, opt-in OFF
+unzip_is_on()  { [ -e "$AUTOUNZIP_FLAG" ]; } # auto-unzip .zip, opt-in OFF
+get_largefile() {
+    local v=""
+    [ -r "$LFFILE" ] && v=$(tr -dc '0-9' < "$LFFILE" 2>/dev/null)
+    [ -n "$v" ] && echo "$v" || echo "$RECOMMENDED_LARGEFILE_GB"
+}
+set_largefile() { case "$1" in *[!0-9]*|"") return 1 ;; esac; printf '%s\n' "$1" > "$LFFILE"; }
+
+sorter_on()  { launchctl enable "$TARGET"; launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; }
+sorter_off() { launchctl bootout "$TARGET" 2>/dev/null; launchctl disable "$TARGET"; }
+
+# read/format/set the launchd StartInterval (the safety-net auto-run cadence)
+get_interval() {
+    local v=""
+    [ -r "$PLIST" ] && v=$(/usr/libexec/PlistBuddy -c "Print :StartInterval" "$PLIST" 2>/dev/null)
+    case "$v" in ""|*[!0-9]*) echo "" ;; *) echo "$v" ;; esac   # only ever a clean integer (or empty)
+}
+fmt_interval() {
+    local s="$1"
+    if   [ -z "$s" ] || [ "$s" -le 0 ] 2>/dev/null;            then echo "off"
+    elif [ "$s" -ge 86400 ] && [ $((s % 86400)) -eq 0 ]; then echo "$((s/86400))d"
+    elif [ "$s" -ge 3600 ]  && [ $((s % 3600))  -eq 0 ]; then echo "$((s/3600))h"
+    elif [ "$s" -ge 60 ]    && [ $((s % 60))    -eq 0 ]; then echo "$((s/60))m"
+    else echo "${s}s"; fi
+}
+set_interval() {
+    local secs="$1"
+    case "$secs" in ""|*[!0-9]*) return 1 ;; esac     # digits only
+    [ "$secs" -lt 60 ] && return 1                    # launchd throttles below this anyway
+    /usr/libexec/PlistBuddy -c "Set :StartInterval $secs" "$PLIST" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Add :StartInterval integer $secs" "$PLIST" 2>/dev/null || return 1
+    # reload so launchd picks up the change — but only if it's currently running,
+    # so we never silently turn a disabled sorter back on
+    if is_loaded; then
+        launchctl bootout "$TARGET" 2>/dev/null
+        launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null
+    fi
+}
+
+# archive age (in days); stored in AGEFILE, default RECOMMENDED_ARCHIVE_DAYS
+get_archivedays() {
+    local v=""
+    [ -r "$AGEFILE" ] && v=$(tr -dc '0-9' < "$AGEFILE" 2>/dev/null)
+    [ -n "$v" ] && echo "$v" || echo "$RECOMMENDED_ARCHIVE_DAYS"
+}
+set_archivedays() {
+    local d="$1"
+    case "$d" in ""|*[!0-9]*) return 1 ;; esac
+    [ "$d" -lt 1 ] && return 1
+    printf '%s\n' "$d" > "$AGEFILE"
+}
+
+# undo the most recent recorded run (sort or migration): move each file back to
+# its original path. Never deletes; skips anything whose origin is now occupied.
+run_undo() {
+    [ -s "$UNDO_FILE" ] || { echo "Nothing to undo (no recorded run)."; return; }
+    local n=0 skip=0 old new
+    while IFS=$'\t' read -r old new; do
+        [ -n "$old" ] && [ -n "$new" ] || continue
+        [ -e "$new" ] || { skip=$((skip+1)); continue; }       # already gone/moved
+        if [ -e "$old" ]; then echo "  skip (origin exists): $(basename "$old")"; skip=$((skip+1)); continue; fi
+        mkdir -p "$(dirname "$old")"
+        if mv -n "$new" "$old" 2>/dev/null; then n=$((n+1)); else skip=$((skip+1)); fi
+    done < "$UNDO_FILE"
+    mv -f "$UNDO_FILE" "$UNDO_FILE.undone" 2>/dev/null
+    echo "Undo: $n file(s) moved back$( [ "$skip" -gt 0 ] && echo ", $skip skipped" )."
+}
+
+# dry-run preview and stats reuse the sorter's own classify()/MANAGED_DIRS by
+# sourcing it inside a subshell (its run-guard means sourcing has no side effects)
+run_preview() ( source "$SORTER" >/dev/null 2>&1 && preview )
+run_stats() (
+    source "$SORTER" >/dev/null 2>&1 || { echo "Could not load sorter."; exit 1; }
+    local d n sz arch
+    printf '  %sFiles by category%s\n' "$BLD" "$R"
+    for d in "${MANAGED_DIRS[@]}"; do
+        [ -d "$DIR/$d" ] || continue
+        n=$(find "$DIR/$d" -type f ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
+        [ "${n:-0}" -eq 0 ] && continue
+        sz=$(du -sh "$DIR/$d" 2>/dev/null | cut -f1)
+        printf '   %-24s %5s files  %7s\n' "$d" "$n" "$sz"
+    done
+    if [ -d "$DIR/Archive" ]; then
+        arch=$(find "$DIR/Archive" -type f ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
+        sz=$(du -sh "$DIR/Archive" 2>/dev/null | cut -f1)
+        printf '   %s%-24s %5s files  %7s%s\n' "$DIM" "Archive (all)" "$arch" "$sz" "$R"
+    fi
+    local last
+    last=$(grep -hE ' (moved|archived|renamed): ' "$LOG" 2>/dev/null | tail -n1 | cut -c1-19)
+    printf '\n   Last activity: %s\n' "${last:-(none yet)}"
+)
+# list the user's custom rules exactly as the sorter parses them
+run_rules() (
+    rf="$HOME/.downloads-rules.conf"
+    if [ ! -r "$rf" ]; then
+        echo "No custom rules yet. Create $rf with lines like:"
+        echo "    *statement*   -> Documents/Finance"
+        echo "    *.dwg         -> 3D & CAD"
+        echo "(arrow may be -> or →; rules are checked before the built-in categories)"
+        exit 0
+    fi
+    source "$SORTER" >/dev/null 2>&1
+    if [ "${#RULE_PAT[@]}" -eq 0 ]; then echo "Rules file present but no valid rules parsed."; exit 0; fi
+    echo "Custom rules (checked before built-ins):"
+    for i in "${!RULE_PAT[@]}"; do printf '   %-28s → %s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}"; done
+)
+
+show_status() {
+    local iv ad; iv=$(get_interval); ad=$(get_archivedays)
+    if is_loaded; then echo "Sorter: ON (loaded)"; else echo "Sorter: OFF (not loaded)"; fi
+    notify_is_on && echo "Notifications: ON" || echo "Notifications: OFF"
+    clean_is_on  && echo "Filename cleanup: ON" || echo "Filename cleanup: OFF"
+    aging_is_on  && echo "Aging nudge (weekly, Archive >1yr): ON" || echo "Aging nudge: OFF"
+    dedup_is_on  && echo "Duplicate routing: ON (identical → Duplicates/)" || echo "Duplicate routing: OFF"
+    if [ "$(get_largefile)" = 0 ]; then echo "Big-file quarantine: OFF"
+    else echo "Big-file quarantine: ≥ $(get_largefile) GB → Large Files/ (recommended $RECOMMENDED_LARGEFILE_GB)"; fi
+    ss_is_on    && echo "Screenshot dating: ON (date-prefix + monthly folders)" || echo "Screenshot dating: OFF"
+    meta_is_on  && echo "Metadata naming (PDF titles): ON" || echo "Metadata naming: OFF (opt-in)"
+    unzip_is_on && echo "Auto-unzip (.zip): ON" || echo "Auto-unzip: OFF (opt-in)"
+    if [ -r "$HOME/.downloads-rules.conf" ]; then
+        echo "Custom rules: $(grep -vE '^[[:space:]]*#' "$HOME/.downloads-rules.conf" | grep -cE '\->|→') active (downloads-sorter rules)"
+    else echo "Custom rules: none (~/.downloads-rules.conf)"; fi
+    echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — recommended every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
+    echo "Archive age: $ad days — recommended $RECOMMENDED_ARCHIVE_DAYS"
+    echo "Recent activity:"
+    tail -n 5 "$LOG" 2>/dev/null || echo "  (no log yet)"
+}
+
+# ---------- interactive UI ----------
+
+# compact "HH:MM  file → Dest" lines for the activity panel
+recent_lines() {
+    tail -n 3 "$LOG" 2>/dev/null |
+        sed -E -e 's/^[0-9-]+ ([0-9]{2}:[0-9]{2}):[0-9]{2} moved: /\1  /' \
+               -e 's| -> (.*)/$| → \1|' | cut -c 1-60
+}
+
+# row <index> <plain-label> <colored-label> — reverse-video when focused
+row() {
+    if [ "$1" -eq "$focus" ]; then
+        printf '  %s ▸ %-41s%s\n' "$REV" "$2" "$R"
+    else
+        printf '     %s\n' "$3"
+    fi
+}
+
+# one-line explanation of the currently focused menu row
+describe_main() {
+    case "$1" in
+        0) echo "Master switch for the whole auto-sorter (persists across reboots)." ;;
+        1) echo "Run a sort pass right now." ;;
+        2) echo "Dry run: show where loose files WOULD go. Moves nothing." ;;
+        3) echo "Move the most recent run's files back where they came from." ;;
+        4) echo "File counts and sizes per category, plus last activity time." ;;
+        5) echo "Recent moves and archives, newest first." ;;
+        6) echo "Open Settings — schedule, archive age, and all the feature toggles." ;;
+        7) echo "Detailed guide to every feature and how to use them." ;;
+        8) echo "Exit this menu — the sorter keeps running in the background." ;;
+    esac
+}
+describe_settings() {
+    case "$1" in
+        0)  echo "Show a banner after each sort, summarizing what moved where." ;;
+        1)  echo "Tidy messy download names before filing — off by default, logged & undoable." ;;
+        2)  echo "How often the backup timer runs; new files sort instantly via folder-watching." ;;
+        3)  echo "Files older than this move into Archive/, keeping the same folder structure." ;;
+        4)  echo "Weekly heads-up if Archive holds files over a year old. Never deletes." ;;
+        5)  echo "Byte-identical files go to Duplicates/ for bulk review instead of 'name (2)'." ;;
+        6)  echo "Files at/above this size go to Large Files/ to handle deliberately (never archived)." ;;
+        7)  echo "Rename screenshots to '2026-06-14 Screenshot.png' and file them by month." ;;
+        8)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
+        9)  echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
+        10) echo "Return to the main menu." ;;
+    esac
+}
+
+draw() {
+    local s_plain s_col n_plain n_col c_plain c_col i_plain i_col a_plain a_col recent
+    local iv ivf ad
+    iv=$(get_interval); ivf=$(fmt_interval "${iv:-0}"); ad=$(get_archivedays)
+
+    if is_loaded; then
+        s_plain="Sorter             ● ON";  s_col="Sorter             ${GRN}● ON${R}"
+    else
+        s_plain="Sorter             ○ OFF"; s_col="Sorter             ${DIM}○ OFF${R}"
+    fi
+    if notify_is_on; then
+        n_plain="Notifications      ● ON";  n_col="Notifications      ${GRN}● ON${R}"
+    else
+        n_plain="Notifications      ○ OFF"; n_col="Notifications      ${DIM}○ OFF${R}"
+    fi
+    if clean_is_on; then
+        c_plain="Filename cleanup   ● ON";  c_col="Filename cleanup   ${GRN}● ON${R}"
+    else
+        c_plain="Filename cleanup   ○ OFF"; c_col="Filename cleanup   ${DIM}○ OFF${R}"
+    fi
+    i_plain="Auto-run interval  every $ivf"
+    if [ "$iv" = "$RECOMMENDED_INTERVAL" ]; then
+        i_col="Auto-run interval  ${GRN}every $ivf${R} ${DIM}(recommended)${R}"
+    else
+        i_col="Auto-run interval  ${YEL}every $ivf${R} ${DIM}(rec $(fmt_interval "$RECOMMENDED_INTERVAL"))${R}"
+    fi
+    a_plain="Archive age        $ad days"
+    if [ "$ad" = "$RECOMMENDED_ARCHIVE_DAYS" ]; then
+        a_col="Archive age        ${GRN}$ad days${R} ${DIM}(recommended)${R}"
+    else
+        a_col="Archive age        ${YEL}$ad days${R} ${DIM}(rec $RECOMMENDED_ARCHIVE_DAYS)${R}"
+    fi
+    local g_plain g_col d_plain d_col lf lf_plain lf_col ss_plain ss_col mt_plain mt_col au_plain au_col
+    if aging_is_on; then
+        g_plain="Aging nudge        ● ON";  g_col="Aging nudge        ${GRN}● ON${R}"
+    else
+        g_plain="Aging nudge        ○ OFF"; g_col="Aging nudge        ${DIM}○ OFF${R}"
+    fi
+    if dedup_is_on; then
+        d_plain="Duplicate routing  ● ON";  d_col="Duplicate routing  ${GRN}● ON${R}"
+    else
+        d_plain="Duplicate routing  ○ OFF"; d_col="Duplicate routing  ${DIM}○ OFF${R}"
+    fi
+    lf=$(get_largefile)
+    if [ "$lf" = 0 ]; then
+        lf_plain="Big files          off"
+        lf_col="Big files          ${DIM}off${R} ${DIM}(rec ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
+    elif [ "$lf" = "$RECOMMENDED_LARGEFILE_GB" ]; then
+        lf_plain="Big files          ≥ $lf GB"
+        lf_col="Big files          ${GRN}≥ $lf GB${R} ${DIM}(recommended)${R}"
+    else
+        lf_plain="Big files          ≥ $lf GB"
+        lf_col="Big files          ${YEL}≥ $lf GB${R} ${DIM}(rec ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
+    fi
+    if ss_is_on; then
+        ss_plain="Screenshot dating  ● ON";  ss_col="Screenshot dating  ${GRN}● ON${R}"
+    else
+        ss_plain="Screenshot dating  ○ OFF"; ss_col="Screenshot dating  ${DIM}○ OFF${R}"
+    fi
+    if meta_is_on; then
+        mt_plain="Metadata naming    ● ON";  mt_col="Metadata naming    ${GRN}● ON${R}"
+    else
+        mt_plain="Metadata naming    ○ OFF"; mt_col="Metadata naming    ${DIM}○ OFF${R}"
+    fi
+    if unzip_is_on; then
+        au_plain="Auto-unzip         ● ON";  au_col="Auto-unzip         ${GRN}● ON${R}"
+    else
+        au_plain="Auto-unzip         ○ OFF"; au_col="Auto-unzip         ${DIM}○ OFF${R}"
+    fi
+
+    local SEP="${DIM}─────────────────────────────────────────────${R}"
+    printf '\033[H\033[2J'
+    if [ "$SCREEN" = settings ]; then
+        printf '\n  %s %s\n' "${BLD}Downloads Sorter${R}" "${DIM}· Settings${R}"
+        printf '  %s\n' "$SEP"
+        row 0 "$n_plain"  "$n_col"
+        row 1 "$c_plain"  "$c_col"
+        row 2 "$i_plain"  "$i_col"
+        row 3 "$a_plain"  "$a_col"
+        row 4 "$g_plain"  "$g_col"
+        row 5 "$d_plain"  "$d_col"
+        row 6 "$lf_plain" "$lf_col"
+        row 7 "$ss_plain" "$ss_col"
+        row 8 "$mt_plain" "$mt_col"
+        row 9 "$au_plain" "$au_col"
+        printf '  %s\n' "$SEP"
+        row 10 "← Back to menu" "← Back to menu"
+        printf '  %s\n' "$SEP"
+        printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
+        printf '  %s\n' "${GRN}${MSG}${R}"
+        printf '\n  %s\n' "${DIM}↑/↓ move · enter or 1-9,0 · esc back · q quit${R}"
+    else
+        printf '\n  %s\n' "${BLD}Downloads Sorter${R}"
+        printf '  %s\n' "$SEP"
+        row 0 "$s_plain" "$s_col"
+        printf '  %s\n' "$SEP"
+        row 1 "Sort now"          "Sort now"
+        row 2 "Preview (dry run)" "Preview (dry run)"
+        row 3 "Undo last run"     "Undo last run"
+        row 4 "Stats"             "Stats"
+        row 5 "Activity log"      "Activity log"
+        printf '  %s\n' "$SEP"
+        row 6 "Settings ▸"        "${BLD}Settings ▸${R}"
+        row 7 "Help & guide"      "Help & guide"
+        row 8 "Close menu"        "Close menu"
+        printf '  %s\n' "$SEP"
+        printf '  %s➜ %s%s\n' "$DIM" "$(describe_main "$focus")" "$R"
+        printf '  %s\n' "${GRN}${MSG}${R}"
+        printf '  %s\n' "${DIM}Recent activity${R}"
+        recent=$(recent_lines)
+        if [ -n "$recent" ]; then
+            printf '%s\n' "$recent" | while IFS= read -r l; do printf '   %s%s%s\n' "$DIM" "$l" "$R"; done
+        else
+            printf '   %s(none yet)%s\n' "$DIM" "$R"
+        fi
+        printf '\n  %s\n' "${DIM}↑/↓ move · enter or 1-9 · q quit${R}"
+    fi
+}
+
+toggle_sorter() {
+    if is_loaded; then sorter_off; MSG="Sorter turned OFF (stays off until turned back on)"
+    else sorter_on; MSG="Sorter turned ON"; fi
+}
+
+toggle_notify() {
+    if notify_is_on; then touch "$NONOTIFY_FLAG"; MSG="Notifications turned OFF"
+    else rm -f "$NONOTIFY_FLAG"; MSG="Notifications turned ON"; fi
+}
+
+toggle_cleannames() {
+    if clean_is_on; then rm -f "$CLEANFLAG"; MSG="Filename cleanup OFF"
+    else touch "$CLEANFLAG"; MSG="Filename cleanup ON — new sorts tidy messy names (logged, undoable)"; fi
+}
+
+toggle_aging() {
+    if aging_is_on; then touch "$AGING_FLAG"; MSG="Aging nudge OFF"
+    else rm -f "$AGING_FLAG"; MSG="Aging nudge ON — weekly heads-up for Archive files over a year old"; fi
+}
+
+toggle_duplicates() {
+    if dedup_is_on; then touch "$DEDUP_FLAG"; MSG="Duplicate routing OFF (identical files get 'name (2)' again)"
+    else rm -f "$DEDUP_FLAG"; MSG="Duplicate routing ON — byte-identical files go to Duplicates/"; fi
+}
+
+toggle_screenshotdate() {
+    if ss_is_on; then touch "$SS_FLAG"; MSG="Screenshot dating OFF (kept as-is in Screenshots/)"
+    else rm -f "$SS_FLAG"; MSG="Screenshot dating ON — '2026-06-14 Screenshot.png' in monthly folders"; fi
+}
+
+toggle_metanames() {
+    if meta_is_on; then rm -f "$META_FLAG"; MSG="Metadata naming OFF"
+    else touch "$META_FLAG"; MSG="Metadata naming ON — PDFs renamed from their embedded title (opt-in)"; fi
+}
+
+toggle_autounzip() {
+    if unzip_is_on; then rm -f "$AUTOUNZIP_FLAG"; MSG="Auto-unzip OFF"
+    else touch "$AUTOUNZIP_FLAG"; MSG="Auto-unzip ON — .zip files expand into a same-named subfolder (opt-in)"; fi
+}
+
+# arrow-key picker for the auto-run interval (presets, not free text)
+pick_interval() {
+    local opts=(900 1800 3600 10800 21600 43200 86400)
+    local labels=("15 minutes" "30 minutes" "1 hour" "3 hours" "6 hours" "12 hours" "1 day")
+    local cur sel=2 i k mark curmark
+    cur=$(get_interval)
+    for i in "${!opts[@]}"; do [ "${opts[$i]}" = "$cur" ] && sel="$i"; done
+    while :; do
+        printf '\033[H\033[2J'
+        printf '\n  %sAuto-run interval%s\n' "$BLD" "$R"
+        printf '  %sHow often the backup timer runs. New downloads still sort instantly%s\n' "$DIM" "$R"
+        printf '  %svia folder-watching — this timer is only a safety net.%s\n\n' "$DIM" "$R"
+        for i in "${!opts[@]}"; do
+            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_INTERVAL" ] && mark=" ${DIM}· recommended${R}"
+            curmark=""; [ "${opts[$i]}" = "$cur" ] && curmark=" ${GRN}· current${R}"
+            if [ "$i" -eq "$sel" ]; then
+                printf '   %s ▸ %d. %-11s %s%s%s\n' "$REV" "$((i+1))" "${labels[$i]}" "$R" "$mark" "$curmark"
+            else
+                printf '     %d. %-11s%s%s\n' "$((i+1))" "${labels[$i]}" "$mark" "$curmark"
+            fi
+        done
+        printf '\n  %s↑/↓ move · 1-7 jump · enter select · esc cancel%s' "$DIM" "$R"
+        k=$(read_key)
+        case "$k" in
+            up|k)   sel=$(( (sel + ${#opts[@]} - 1) % ${#opts[@]} )) ;;
+            down|j) sel=$(( (sel + 1) % ${#opts[@]} )) ;;
+            [1-7])  sel=$((k-1)) ;;
+            "")     set_interval "${opts[$sel]}" && MSG="Auto-run interval → every $(fmt_interval "${opts[$sel]}")" || MSG="Could not set interval"; return ;;
+            q|esc)  MSG="Interval unchanged"; return ;;
+        esac
+    done
+}
+
+# arrow-key picker for the big-file quarantine threshold (0 = off)
+pick_largefile() {
+    local opts=(0 1 2 5 10 20)
+    local labels=("Off — never quarantine" "1 GB" "2 GB" "5 GB" "10 GB" "20 GB")
+    local cur sel=3 i k mark curmark
+    cur=$(get_largefile)
+    for i in "${!opts[@]}"; do [ "${opts[$i]}" = "$cur" ] && sel="$i"; done
+    while :; do
+        printf '\033[H\033[2J'
+        printf '\n  %sBig-file quarantine%s\n' "$BLD" "$R"
+        printf '  %sFiles at or above this size go to Large Files/ for you to handle%s\n' "$DIM" "$R"
+        printf '  %sdeliberately — they are never auto-archived.%s\n\n' "$DIM" "$R"
+        for i in "${!opts[@]}"; do
+            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_LARGEFILE_GB" ] && mark=" ${DIM}· recommended${R}"
+            curmark=""; [ "${opts[$i]}" = "$cur" ] && curmark=" ${GRN}· current${R}"
+            if [ "$i" -eq "$sel" ]; then
+                printf '   %s ▸ %d. %-22s %s%s%s\n' "$REV" "$((i+1))" "${labels[$i]}" "$R" "$mark" "$curmark"
+            else
+                printf '     %d. %-22s%s%s\n' "$((i+1))" "${labels[$i]}" "$mark" "$curmark"
+            fi
+        done
+        printf '\n  %s↑/↓ move · 1-6 jump · enter select · esc cancel%s' "$DIM" "$R"
+        k=$(read_key)
+        case "$k" in
+            up|k)   sel=$(( (sel + ${#opts[@]} - 1) % ${#opts[@]} )) ;;
+            down|j) sel=$(( (sel + 1) % ${#opts[@]} )) ;;
+            [1-6])  sel=$((k-1)) ;;
+            "")     set_largefile "${opts[$sel]}"; [ "${opts[$sel]}" = 0 ] && MSG="Big-file quarantine OFF" || MSG="Big files ≥ ${opts[$sel]} GB → Large Files/"; return ;;
+            q|esc)  MSG="Big-file threshold unchanged"; return ;;
+        esac
+    done
+}
+
+prompt_archivedays() {
+    local cur input
+    cur=$(get_archivedays)
+    printf '\033[?25h'
+    printf '\n  %sChange archive age%s\n' "$BLD" "$R"
+    printf '  Files older than this (modified date) move into Archive/.\n'
+    printf '  Current: %s days   %sRecommended: %s days%s\n' "$cur" "$DIM" "$RECOMMENDED_ARCHIVE_DAYS" "$R"
+    printf '  Days, %sr%s = recommended, blank = keep: ' "$BLD" "$R"
+    IFS= read -r input
+    printf '\033[?25l'
+    case "$input" in
+        "")        MSG="Archive age unchanged ($cur days)" ;;
+        r|R)       set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && MSG="Archive age → $RECOMMENDED_ARCHIVE_DAYS days (recommended)" ;;
+        *[!0-9]*)  MSG="Invalid — digits only" ;;
+        *)         if set_archivedays "$input"; then MSG="Archive age → $input days"; else MSG="Unchanged (minimum 1)"; fi ;;
+    esac
+}
+
+# full-screen sub-views (preview / undo / stats), each waits for a keypress
+_pause() { printf '\n  %spress any key to return%s' "$DIM" "$R"; IFS= read -r -s -n 1 _ 2>/dev/null; }
+do_preview() {
+    printf '\033[H\033[2J'; printf '\n  %sPreview — where loose files would go%s  %s(nothing moved)%s\n\n' "$BLD" "$R" "$DIM" "$R"
+    run_preview 2>/dev/null | sed 's/^/  /'; _pause; MSG="Preview shown (no changes made)"
+}
+do_undo() {
+    printf '\033[H\033[2J'; printf '\n  %sUndo last run%s\n\n' "$BLD" "$R"
+    run_undo 2>/dev/null | sed 's/^/  /'; _pause; MSG="Undo finished"
+}
+do_stats() {
+    printf '\033[H\033[2J'; printf '\n  %sStats%s\n\n' "$BLD" "$R"
+    run_stats 2>/dev/null; _pause; MSG=""
+}
+
+do_run() {
+    if is_loaded; then
+        launchctl kickstart "$TARGET" 2>/dev/null && MSG="Sort pass triggered" || MSG="Trigger failed (already running?)"
+    else
+        MSG="Sorter is OFF — turn it on first"
+    fi
+}
+
+# activity log view: newest first, grouped under Today/Yesterday/date headers,
+# "HH:MM  name  → Dest" columns; non-move lines (mv/osascript errors) in yellow
+do_log() {
+    local today ydy today_lbl ydy_lbl total
+    today=$(date +%F); ydy=$(date -v-1d +%F)
+    today_lbl="Today — $(date '+%e %b' | sed 's/^ *//')"
+    ydy_lbl="Yesterday — $(date -v-1d '+%e %b' | sed 's/^ *//')"
+
+    printf '\033[H\033[2J'
+    printf '\n  %s\n' "${BLD}Downloads Sorter — activity log${R}"
+    printf '  %s\n' "${DIM}────────────────────────────────────────────────────────────${R}"
+    if [ ! -s "$LOG" ]; then
+        printf '\n   %s(no activity yet)%s\n' "$DIM" "$R"
+    else
+        total=$(grep -c " moved: " "$LOG" 2>/dev/null)
+        tail -n 40 "$LOG" | tail -r | awk \
+            -v today="$today" -v ydy="$ydy" -v tlbl="$today_lbl" -v ylbl="$ydy_lbl" \
+            -v dim="$DIM" -v grn="$GRN" -v bld="$BLD" -v yel="$YEL" -v r="$R" '
+        {
+            n = split($0, p, " -> ")
+            if (n >= 2 && substr($0, 21, 7) == "moved: ") {
+                dest = p[n]; sub(/\/$/, "", dest)
+                d = substr($0, 1, 10); t = substr($0, 12, 5)
+                name = substr($0, 28, length($0) - 27 - length(p[n]) - 4)
+                if (d != lastd) {
+                    lbl = (d == today) ? tlbl : (d == ydy) ? ylbl : d
+                    printf "\n  %s%s%s\n", bld, lbl, r
+                    lastd = d
+                }
+                if (length(name) > 38) name = substr(name, 1, 37) "…"
+                printf "   %s%s%s  %-38s %s→ %s%s\n", dim, t, r, name, grn, dest, r
+                moves++
+            } else {
+                printf "   %s⚠ %s%s\n", yel, $0, r
+            }
+        }
+        END { if (!moves) printf "\n   %s(no moves in recent log)%s\n", dim, r }'
+        printf '\n  %s\n' "${DIM}newest first · showing last 40 entries · $total moves in full log${R}"
+        printf '  %s\n' "${DIM}full file: ~/Library/Logs/organize-downloads.log${R}"
+    fi
+    printf '\n  %s' "${DIM}press any key to return${R}"
+    IFS= read -r -s -n 1 _ 2>/dev/null
+}
+
+# one keypress -> token (up/down/esc/empty-string for enter+space/literal char)
+read_key() {
+    local k rest
+    IFS= read -r -s -n 1 k || return 1
+    if [ "$k" = $'\033' ]; then
+        IFS= read -r -s -n 2 -t 1 rest 2>/dev/null
+        case "$rest" in
+            '[A') printf 'up' ;;
+            '[B') printf 'down' ;;
+            *)    printf 'esc' ;;
+        esac
+    else
+        printf '%s' "$k"
+    fi
+}
+
+help_text() {
+    cat <<'EOF'
+  ════════════════════════════════════════════════════════════════
+   DOWNLOADS SORTER — User Guide
+  ════════════════════════════════════════════════════════════════
+
+  WHAT IT DOES
+   Watches your ~/Downloads folder and automatically files loose
+   downloads into tidy category folders. It reacts the instant a
+   download lands (folder-watching) and also runs on an hourly
+   safety-net timer. It only ever MOVES files — it never deletes or
+   overwrites, and every move can be undone.
+
+  HOW IT DECIDES WHERE A FILE GOES (first match wins)
+   1. Your custom rules in ~/.downloads-rules.conf (highest priority)
+   2. Filename keywords (screenshot/SCR, invoice, receipt, statement…)
+   3. File extension
+   Only loose files at the TOP of ~/Downloads are sorted. Any folder
+   you create yourself is left completely untouched.
+
+  THE LIBRARY IT BUILDS
+   Screenshots/YYYY-MM/       screenshots, dated and bucketed by month
+   Media/{Images,Audio,Video} photos, music, video (+ subtitles)
+   Documents/{PDFs,Slides,Spreadsheets,Word & Text,eBooks,Web}
+   Compressed Files/          zip, tar, 7z, rar, gz …
+   Disk Images/               dmg, iso, img …
+   Installers & Apps/         pkg, app, exe, deb …
+   Code & Scripts/            py, js, sh, json, sql …
+   Design/  Fonts/  3D & CAD/  Torrents/  Data/  Calendars & Contacts/
+   Invoices & Receipts/       names containing invoice/receipt/statement
+   Misc/                      anything uncategorized
+   Duplicates/                byte-identical copies, set aside for review
+   Large Files/               files at/above your size threshold
+   Archive/                   mirrors ALL of the above for files older
+                              than your "archive age" (default 30 days)
+
+  THINGS YOU CAN DO (main menu)
+   Sort now       run a sorting pass right away
+   Preview        DRY RUN: shows where loose files would go, moves nothing
+   Undo last run  moves the most recent run's files back where they were
+   Stats          file counts and sizes per category
+   Activity log   recent moves/archives, newest first
+
+  SETTINGS (open "Settings ▸")
+   Notifications      a banner after each sort, grouped by category
+   Filename cleanup   (OPT-IN) tidies messy names — strips URL junk and
+                      long random hashes and trailing "copy"/"v2"; it is
+                      deliberately conservative and protects real names.
+                      Every rename is logged and is undoable.
+   Auto-run interval  how often the safety-net timer fires (default 1h).
+                      Real-time folder-watching is always on regardless,
+                      so downloads still sort instantly.
+   Archive age        files older than this (by date) move into Archive/,
+                      keeping the same folder layout (default 30 days)
+   Aging nudge        weekly heads-up if Archive holds files over a year
+                      old — it NEVER deletes anything
+   Duplicate routing  identical files (same size + checksum) go to
+                      Duplicates/ instead of being renamed "name (2)"
+   Big files          files at/above this size (default 5 GB) go to
+                      Large Files/ so you can deal with them deliberately
+   Screenshot dating  renames "Screen Shot …" / "SCR-…" to
+                      "2026-06-14 Screenshot.png" and files them by month
+   Metadata naming    (OPT-IN) renames PDFs using their embedded title
+   Auto-unzip         (OPT-IN) expands .zip into a same-named subfolder,
+                      size-guarded; the contents are not re-sorted
+
+   Anything marked (OPT-IN) is OFF until you switch it on — nothing about
+   your files changes unless you choose to enable it.
+
+  CUSTOM RULES
+   Create ~/.downloads-rules.conf with lines like:
+       *statement*   -> Documents/Finance
+       *.dwg         -> 3D & CAD
+   (the arrow can be -> or →). These override the built-in categories.
+   See them anytime with:   downloads-sorter rules
+
+  SAFETY
+   • Never deletes or overwrites — uses a no-clobber move and adds
+     " (2)" on a name clash.
+   • Every move / rename / archive is logged to
+     ~/Library/Logs/organize-downloads.log
+   • "Undo last run" reverses the most recent batch.
+   • Every tunable shows a recommended value next to it.
+
+  COMMAND LINE (everything the menu does, scriptable)
+   downloads-sorter                 open this menu
+   downloads-sorter status          show every current setting
+   downloads-sorter run | preview | undo | stats | rules
+   downloads-sorter notify|cleannames|aging|duplicates on|off
+   downloads-sorter screenshotdate|metanames|autounzip on|off
+   downloads-sorter interval [seconds|r]      (r = recommended)
+   downloads-sorter archivedays [days|r]
+   downloads-sorter largefiles [GB|r]         (0 = off)
+   downloads-sorter on | off        enable/disable the whole sorter
+
+  GETTING AROUND THIS MENU
+   ↑/↓ to move, Enter to choose, or press a number (1-9) to jump
+   straight to an item. In Settings, Esc goes back; q quits anywhere.
+
+  (press q to close this guide)
+EOF
+}
+
+do_help() {
+    if command -v less >/dev/null 2>&1; then help_text | less -R
+    else printf '\033[H\033[2J'; help_text; _pause; fi
+    printf '\033[?25l'      # less may have re-shown the cursor
+    MSG=""
+}
+
+activate() {
+    if [ "$SCREEN" = settings ]; then
+        case "$focus" in
+            0)  toggle_notify ;;
+            1)  toggle_cleannames ;;
+            2)  pick_interval ;;
+            3)  prompt_archivedays ;;
+            4)  toggle_aging ;;
+            5)  toggle_duplicates ;;
+            6)  pick_largefile ;;
+            7)  toggle_screenshotdate ;;
+            8)  toggle_metanames ;;
+            9)  toggle_autounzip ;;
+            10) SCREEN=main; focus=6 ;;
+        esac
+    else
+        case "$focus" in
+            0) toggle_sorter ;;
+            1) do_run ;;
+            2) do_preview ;;
+            3) do_undo ;;
+            4) do_stats ;;
+            5) do_log ;;
+            6) SCREEN=settings; focus=0 ;;
+            7) do_help ;;
+            8) QUIT=1 ;;
+        esac
+    fi
+}
+
+ui_main() {
+    local QUIT=0 focus=0 MSG="" key SCREEN=main NROWS idx
+    # alternate screen: menu doesn't eat scrollback; prior content restored on exit
+    [ -t 1 ] && printf '\033[?1049h'
+    printf '\033[?25l'
+    trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
+    while [ "$QUIT" -eq 0 ]; do
+        [ "$SCREEN" = settings ] && NROWS=11 || NROWS=9
+        draw
+        MSG=""
+        key=$(read_key) || break
+        case "$key" in
+            up|k)   focus=$(( (focus + NROWS - 1) % NROWS )); continue ;;
+            down|j) focus=$(( (focus + 1) % NROWS )); continue ;;
+            "")     activate; continue ;;
+            [0-9])  # number shortcut: 1-9 -> rows 0-8, 0 -> row 9; jump + activate
+                    if [ "$key" = 0 ]; then idx=9; else idx=$((key - 1)); fi
+                    if [ "$idx" -lt "$NROWS" ]; then focus=$idx; activate; fi
+                    continue ;;
+        esac
+        # only navigation keys are screen-specific now
+        if [ "$SCREEN" = settings ]; then
+            case "$key" in esc) SCREEN=main; focus=6 ;; q) QUIT=1 ;; esac
+        else
+            case "$key" in q|esc) QUIT=1 ;; esac
+        fi
+    done
+    printf '\033[?1049l\033[?25h'
+    show_status
+}
+
+# ---------- dispatch ----------
+
+case "$1" in
+    on)
+        sorter_on
+        echo "Downloads sorter: ON" ;;
+    off)
+        sorter_off
+        echo "Downloads sorter: OFF (stays off until you run: downloads-sorter on)" ;;
+    run)
+        launchctl kickstart "$TARGET" && echo "Sort pass triggered." ;;
+    log)
+        tail -n "${2:-15}" "$LOG" ;;
+    notify)
+        case "$2" in
+            on)  rm -f "$NONOTIFY_FLAG"; echo "Notifications: ON" ;;
+            off) touch "$NONOTIFY_FLAG"; echo "Notifications: OFF" ;;
+            *)   notify_is_on && echo "Notifications: ON" || echo "Notifications: OFF" ;;
+        esac ;;
+    cleannames)
+        case "$2" in
+            on)  touch "$CLEANFLAG"; echo "Filename cleanup: ON" ;;
+            off) rm -f "$CLEANFLAG"; echo "Filename cleanup: OFF" ;;
+            *)   clean_is_on && echo "Filename cleanup: ON" || echo "Filename cleanup: OFF" ;;
+        esac ;;
+    aging)
+        case "$2" in
+            on)  rm -f "$AGING_FLAG"; echo "Aging nudge: ON" ;;
+            off) touch "$AGING_FLAG"; echo "Aging nudge: OFF" ;;
+            *)   aging_is_on && echo "Aging nudge: ON" || echo "Aging nudge: OFF" ;;
+        esac ;;
+    duplicates)
+        case "$2" in
+            on)  rm -f "$DEDUP_FLAG"; echo "Duplicate routing: ON" ;;
+            off) touch "$DEDUP_FLAG"; echo "Duplicate routing: OFF" ;;
+            *)   dedup_is_on && echo "Duplicate routing: ON" || echo "Duplicate routing: OFF" ;;
+        esac ;;
+    largefiles)
+        if [ -n "$2" ]; then
+            case "$2" in
+                r|recommended) set_largefile "$RECOMMENDED_LARGEFILE_GB" && echo "Big-file quarantine: ≥ $RECOMMENDED_LARGEFILE_GB GB (recommended)" ;;
+                *) if set_largefile "$2"; then [ "$2" = 0 ] && echo "Big-file quarantine: OFF" || echo "Big-file quarantine: ≥ $2 GB → Large Files/"; else echo "Invalid (whole-number GB, 0 = off)." >&2; exit 1; fi ;;
+            esac
+        else
+            lf=$(get_largefile); [ "$lf" = 0 ] && echo "Big-file quarantine: OFF (recommended $RECOMMENDED_LARGEFILE_GB GB)" || echo "Big-file quarantine: ≥ $lf GB (recommended $RECOMMENDED_LARGEFILE_GB GB)"
+        fi ;;
+    screenshotdate)
+        case "$2" in
+            on)  rm -f "$SS_FLAG"; echo "Screenshot dating: ON" ;;
+            off) touch "$SS_FLAG"; echo "Screenshot dating: OFF" ;;
+            *)   ss_is_on && echo "Screenshot dating: ON" || echo "Screenshot dating: OFF" ;;
+        esac ;;
+    metanames)
+        case "$2" in
+            on)  touch "$META_FLAG"; echo "Metadata naming: ON" ;;
+            off) rm -f "$META_FLAG"; echo "Metadata naming: OFF" ;;
+            *)   meta_is_on && echo "Metadata naming: ON" || echo "Metadata naming: OFF" ;;
+        esac ;;
+    autounzip)
+        case "$2" in
+            on)  touch "$AUTOUNZIP_FLAG"; echo "Auto-unzip: ON" ;;
+            off) rm -f "$AUTOUNZIP_FLAG"; echo "Auto-unzip: OFF" ;;
+            *)   unzip_is_on && echo "Auto-unzip: ON" || echo "Auto-unzip: OFF" ;;
+        esac ;;
+    interval)
+        if [ -n "$2" ]; then
+            case "$2" in
+                r|recommended) set_interval "$RECOMMENDED_INTERVAL" && echo "Auto-run interval: every $(fmt_interval "$RECOMMENDED_INTERVAL") (recommended)" ;;
+                *) if set_interval "$2"; then echo "Auto-run interval: every $(fmt_interval "$2")"; else echo "Invalid (digits only, minimum 60s)." >&2; exit 1; fi ;;
+            esac
+        else
+            iv=$(get_interval)
+            echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s)"
+            echo "Recommended:       every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
+        fi ;;
+    archivedays)
+        if [ -n "$2" ]; then
+            case "$2" in
+                r|recommended) set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && echo "Archive age: $RECOMMENDED_ARCHIVE_DAYS days (recommended)" ;;
+                *) if set_archivedays "$2"; then echo "Archive age: $2 days"; else echo "Invalid (whole number ≥ 1)." >&2; exit 1; fi ;;
+            esac
+        else
+            echo "Archive age: $(get_archivedays) days (recommended $RECOMMENDED_ARCHIVE_DAYS)"
+        fi ;;
+    preview)
+        run_preview ;;
+    undo)
+        run_undo ;;
+    stats)
+        run_stats ;;
+    rules)
+        run_rules ;;
+    status)
+        show_status ;;
+    ui)
+        ui_main ;;
+    "")
+        # bare invocation: interactive UI on a terminal, plain status otherwise
+        if [ -t 0 ] && [ -t 1 ]; then ui_main; else show_status; fi ;;
+    *)
+        cat >&2 <<'USAGE'
+Usage: downloads-sorter <command>   (bare = interactive UI)
+  on | off            enable/disable the sorter
+  status              text status of every setting
+  run                 trigger a sort pass now
+  preview             dry run — show where loose files would go (no moves)
+  undo                move the last run's files back
+  stats               file counts / sizes per category
+  rules               list custom ~/.downloads-rules.conf rules
+  log [n]             last n log lines (default 15)
+  notify on|off       "Downloads sorted" notifications
+  cleannames on|off   opt-in filename cleanup
+  aging on|off        weekly nudge for Archive files over a year old
+  duplicates on|off   route byte-identical files to Duplicates/
+  largefiles [n|r]    GB threshold for Large Files/ (0 = off, r = recommended)
+  screenshotdate on|off  date-prefix screenshots + bucket by month
+  metanames on|off    opt-in: rename PDFs from their embedded title
+  autounzip on|off    opt-in: expand .zip into a same-named subfolder
+  interval [secs|r]   show/set safety-net auto-run cadence (r = recommended)
+  archivedays [n|r]   show/set Archive age in days (r = recommended)
+USAGE
+        exit 1 ;;
+esac
