@@ -19,8 +19,10 @@ A lightweight macOS tool that keeps your **Downloads folder tidy automatically**
 ```sh
 git clone https://github.com/Lucid06-K/mac-downloads-sorter.git
 cd mac-downloads-sorter
-./install.sh
+bash install.sh
 ```
+
+> Already cloned it once? `cd` into the folder and run `git pull` first (or delete the folder and re‑clone). Running `bash install.sh` works even if the script isn't marked executable.
 
 That's it. The installer copies two small scripts into `~/Library/Scripts`, builds two tiny helper apps, and starts the sorter in the background.
 
@@ -213,7 +215,7 @@ Checksum + HTTPS verification protects the download path; for a manual update yo
 ## Uninstall
 
 ```sh
-./uninstall.sh
+bash uninstall.sh
 ```
 
 Removes the scripts, helper apps, launch agent, and settings. **Your sorted files and folders in `~/Downloads` are left exactly as they are.**

@@ -144,4 +144,4 @@ info "If you didn't see the Downloads prompt, drop a test file in ~/Downloads an
 info "    \"$CTL\" run     (or just: dsort run)"
 info "Open the menu any time with:  dsort        (or: \"$CTL\")"
 info "Full guide:  dsort  → Help & guide"
-info "Uninstall:   ./uninstall.sh"
+info "Uninstall:   bash uninstall.sh"
