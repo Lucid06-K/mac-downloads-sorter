@@ -119,11 +119,15 @@ launchctl enable "gui/$UID_NUM/$LABEL" 2>/dev/null || true
 ok "Loaded and enabled the sorter"
 
 # 5) convenience alias ------------------------------------------------------
-RC=""
-case "${SHELL##*/}" in zsh) RC="$HOME/.zshrc" ;; bash) RC="$HOME/.bashrc" ;; esac
-if [ -n "$RC" ] && ! grep -q "alias dsort=" "$RC" 2>/dev/null; then
+# default to zsh's rc (macOS default shell); use bashrc only if login shell is bash
+RC="$HOME/.zshrc"; case "${SHELL:-}" in */bash) RC="$HOME/.bashrc" ;; esac
+touch "$RC" 2>/dev/null || true
+RC_DISP="${RC/#$HOME/~}"
+if grep -q 'alias dsort=' "$RC" 2>/dev/null; then
+    info "'dsort' alias already present in $RC_DISP"
+else
     printf '\n# Downloads Sorter — tidy ~/Downloads, open the menu + all commands\nalias dsort="%s"\n' "$CTL" >> "$RC"
-    ok "Added 'dsort' alias to ${RC/#$HOME/~} (restart your shell, then run: dsort)"
+    ok "Added 'dsort' alias to $RC_DISP"
 fi
 
 # 6) permission prompts -----------------------------------------------------
@@ -140,8 +144,10 @@ sleep 1
 
 echo
 bold "Done."
-info "If you didn't see the Downloads prompt, drop a test file in ~/Downloads and run:"
-info "    \"$CTL\" run     (or just: dsort run)"
-info "Open the menu any time with:  dsort        (or: \"$CTL\")"
-info "Full guide:  dsort  → Help & guide"
-info "Uninstall:   bash uninstall.sh"
+echo
+bold "Last step — load the 'dsort' command:   source $RC_DISP"
+info "(or just open a new Terminal window). Then run:  dsort"
+info "You can always run it directly without the alias:  \"$CTL\""
+echo
+info "If you didn't see the Downloads prompt, drop a file in ~/Downloads then run:  dsort run"
+info "Full guide:  dsort  → Help & guide      Uninstall:  bash uninstall.sh"
