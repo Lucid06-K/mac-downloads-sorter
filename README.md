@@ -156,6 +156,24 @@ Create `~/.downloads-rules.conf` to override the built‑in categories:
 
 The arrow may be `->` or `→`; `#` lines are comments. Rules are checked **before** the built‑in categories. List them with `dsort rules`.
 
+### Limit what gets sorted
+
+Two multi‑select checklists in **Settings** let you control scope — tick categories and/or type in file extensions:
+
+- **Exclude from sorting** — matching files are left exactly where they are, and their folder is never created (e.g. exclude `Torrents` + `dmg`).
+- **Only sort these** — if you pick anything here, **only** matching files are sorted; everything else is left alone (e.g. only `Documents` + `Media`).
+
+You can combine them (only `Media`, but exclude `heic`). From the command line:
+
+```sh
+dsort exclude Torrents dmg     # never sort torrents or .dmg files
+dsort only Documents Media     # sort only these; leave the rest alone
+dsort exclude                  # list current exclusions
+dsort exclude clear            # clear the exclude list
+```
+
+Entries are either a **category** (`Media`, `Documents/PDFs`, …) or a bare **file extension** (`dmg`, `heic`).
+
 ---
 
 ## Safety

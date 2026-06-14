@@ -26,8 +26,11 @@ LFFILE="$HOME/Library/Scripts/organize_downloads.largefilegb"
 SS_FLAG="$HOME/Library/Scripts/organize_downloads.noscreenshotdate"
 META_FLAG="$HOME/Library/Scripts/organize_downloads.metanames"
 AUTOUNZIP_FLAG="$HOME/Library/Scripts/organize_downloads.autounzip"
+EXCLUDE_FILE="$HOME/Library/Scripts/organize_downloads.exclude"
+ONLY_FILE="$HOME/Library/Scripts/organize_downloads.only"
 UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
+FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
 RECOMMENDED_ARCHIVE_DAYS=30     # sweep files older than this into Archive/
 RECOMMENDED_LARGEFILE_GB=5      # files >= this go to Large Files/ for review
@@ -42,6 +45,7 @@ dedup_is_on()  { [ ! -e "$DEDUP_FLAG" ]; }   # duplicates -> Duplicates/, defaul
 ss_is_on()     { [ ! -e "$SS_FLAG" ]; }      # screenshot date-prefix + buckets, default ON
 meta_is_on()   { [ -e "$META_FLAG" ]; }      # PDF metadata naming, opt-in OFF
 unzip_is_on()  { [ -e "$AUTOUNZIP_FLAG" ]; } # auto-unzip .zip, opt-in OFF
+filter_count() { local f; [ "$1" = only ] && f="$ONLY_FILE" || f="$EXCLUDE_FILE"; [ -r "$f" ] && grep -cvE '^[[:space:]]*(#|$)' "$f" 2>/dev/null || echo 0; }
 get_largefile() {
     local v=""
     [ -r "$LFFILE" ] && v=$(tr -dc '0-9' < "$LFFILE" 2>/dev/null)
@@ -163,6 +167,10 @@ show_status() {
     if [ -r "$HOME/.downloads-rules.conf" ]; then
         echo "Custom rules: $(grep -vE '^[[:space:]]*#' "$HOME/.downloads-rules.conf" | grep -cE '\->|→') active (dsort rules)"
     else echo "Custom rules: none (~/.downloads-rules.conf)"; fi
+    ex=$(filter_count exclude); on=$(filter_count only)
+    if [ "$on" -gt 0 ]; then echo "Sorting filter: ONLY sorting $on selected type(s) (+ $ex excluded)"
+    elif [ "$ex" -gt 0 ]; then echo "Sorting filter: excluding $ex type(s)"
+    else echo "Sorting filter: off (sorting everything)"; fi
     echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — recommended every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
     echo "Archive age: $ad days — recommended $RECOMMENDED_ARCHIVE_DAYS"
     echo "Recent activity:"
@@ -213,7 +221,9 @@ describe_settings() {
         7)  echo "Rename screenshots to '2026-06-14 Screenshot.png' and file them by month." ;;
         8)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
         9)  echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
-        10) echo "Return to the main menu." ;;
+        10) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
+        11) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
+        12) echo "Return to the main menu." ;;
     esac
 }
 
@@ -303,7 +313,10 @@ draw() {
         row 8 "$mt_plain" "$mt_col"
         row 9 "$au_plain" "$au_col"
         printf '  %s\n' "$SEP"
-        row 10 "← Back to menu" "← Back to menu"
+        row 10 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
+        row 11 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
+        printf '  %s\n' "$SEP"
+        row 12 "← Back to menu" "← Back to menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -619,6 +632,17 @@ help_text() {
    (the arrow can be -> or →). These override the built-in categories.
    See them anytime with:   dsort rules
 
+  LIMIT WHAT GETS SORTED (Settings → Exclude / Only sort these)
+   Two multi-select checklists let you pick categories (and/or type in file
+   extensions) to control scope:
+     • Exclude from sorting — those files are left exactly where they are, and
+       their folder is never created (e.g. exclude Torrents + dmg).
+     • Only sort these — if you pick anything here, ONLY matching files are
+       sorted and everything else is left alone (e.g. only Documents + Media).
+   You can combine them (only Media, but exclude heic). From the command line:
+       dsort exclude Torrents dmg     dsort only Documents Media
+       dsort exclude clear            dsort exclude            (lists current)
+
   SAFETY
    • Never deletes or overwrites — uses a no-clobber move and adds
      " (2)" on a name clash.
@@ -653,6 +677,65 @@ do_help() {
     MSG=""
 }
 
+# do_filter <exclude|only> — interactive multi-select: tick categories and/or add
+# file extensions, saved to the matching list file. Arrows move, Enter toggles/acts.
+do_filter() {
+    local kind="$1" file title verb sel="" exts="" line c
+    if [ "$kind" = only ]; then file="$ONLY_FILE"; title="Only sort these"; verb="sort only";
+    else file="$EXCLUDE_FILE"; title="Exclude from sorting"; verb="exclude"; fi
+    if [ -r "$file" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in ''|'#'*) continue ;; esac
+            local known=0; for c in "${FILTER_CATS[@]}"; do [ "$c" = "$line" ] && { known=1; break; }; done
+            if [ "$known" = 1 ]; then sel="$sel$line"$'\n'; else exts="$exts $line"; fi
+        done < "$file"
+    fi
+    exts="${exts# }"
+    local n=${#FILTER_CATS[@]} nrows focus=0 key i mark input; nrows=$((n+3))
+    printf '\033[?25l'
+    while :; do
+        printf '\033[H\033[2J'
+        printf '\n  %s%s%s  %s\n' "$BLD" "$title" "$R" "${DIM}— tick categories and/or add file types to $verb${R}"
+        printf '  %s\n' "${DIM}─────────────────────────────────────────────${R}"
+        for i in "${!FILTER_CATS[@]}"; do
+            case $'\n'"$sel" in *$'\n'"${FILTER_CATS[$i]}"$'\n'*) mark="[${GRN}✓${R}]" ;; *) mark="[ ]" ;; esac
+            if [ "$i" -eq "$focus" ]; then printf '   %s ▸ %s %s%s\n' "$REV" "$mark" "${FILTER_CATS[$i]}" "$R"
+            else printf '      %s %s\n' "$mark" "${FILTER_CATS[$i]}"; fi
+        done
+        printf '  %s\n' "${DIM}─────────────────────────────────────────────${R}"
+        if [ "$focus" -eq "$n" ]; then       printf '   %s ▸ File types: %s%s\n' "$REV" "${exts:-(none) — Enter to add}" "$R"
+        else                                 printf '      File types: %s\n' "${exts:-(none) — Enter to add}"; fi
+        if [ "$focus" -eq $((n+1)) ]; then   printf '   %s ▸ Clear all%s\n' "$REV" "$R"; else printf '      Clear all\n'; fi
+        if [ "$focus" -eq $((n+2)) ]; then   printf '   %s ▸ Save & back%s\n' "$REV" "$R"; else printf '      Save & back\n'; fi
+        printf '\n  %s↑/↓ move · enter toggle/choose · esc save & back%s\n' "$DIM" "$R"
+        key=$(read_key)
+        case "$key" in
+            up|k)   focus=$(( (focus + nrows - 1) % nrows )) ;;
+            down|j) focus=$(( (focus + 1) % nrows )) ;;
+            esc)    break ;;
+            "")
+                if [ "$focus" -lt "$n" ]; then
+                    c="${FILTER_CATS[$focus]}"
+                    case $'\n'"$sel" in
+                        *$'\n'"$c"$'\n'*) sel=$(printf '%s' "$sel" | grep -vxF -- "$c"); [ -n "$sel" ] && sel="$sel"$'\n' ;;
+                        *) sel="$sel$c"$'\n' ;;
+                    esac
+                elif [ "$focus" -eq "$n" ]; then
+                    printf '\033[?25h'
+                    printf '\n  Current file types: %s\n' "${exts:-(none)}"
+                    printf '  Enter extensions to %s (space-separated, no dots; blank keeps current): ' "$verb"
+                    IFS= read -r input; printf '\033[?25l'
+                    [ -n "$input" ] && exts=$(printf '%s' "$input" | tr 'A-Z' 'a-z' | tr -s ' ')
+                elif [ "$focus" -eq $((n+1)) ]; then sel=""; exts=""
+                else break; fi ;;
+        esac
+    done
+    : > "$file"
+    { printf '%s' "$sel" | sed '/^$/d'; for c in $exts; do printf '%s\n' "$c"; done; } >> "$file"
+    printf '\033[?25l'
+    MSG="$title: $(filter_count "$kind") item(s) saved"
+}
+
 activate() {
     if [ "$SCREEN" = settings ]; then
         case "$focus" in
@@ -666,7 +749,9 @@ activate() {
             7)  toggle_screenshotdate ;;
             8)  toggle_metanames ;;
             9)  toggle_autounzip ;;
-            10) SCREEN=main; focus=6 ;;
+            10) do_filter exclude ;;
+            11) do_filter only ;;
+            12) SCREEN=main; focus=6 ;;
         esac
     else
         case "$focus" in
@@ -690,7 +775,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=11 || NROWS=9
+        [ "$SCREEN" = settings ] && NROWS=13 || NROWS=9
         draw
         MSG=""
         key=$(read_key) || break
@@ -806,6 +891,16 @@ case "$1" in
         run_stats ;;
     rules)
         run_rules ;;
+    exclude|only)
+        kind="$1"; [ "$kind" = only ] && ff="$ONLY_FILE" || ff="$EXCLUDE_FILE"
+        case "${2:-}" in
+            clear) : > "$ff"; echo "$kind list cleared" ;;
+            "")    if [ -s "$ff" ] && grep -qvE '^[[:space:]]*(#|$)' "$ff"; then
+                       echo "$kind list (categories or extensions):"; grep -vE '^[[:space:]]*(#|$)' "$ff" | sed 's/^/  /'
+                   else echo "$kind list is empty — set it from: dsort → Settings"; fi ;;
+            *)     shift; for a in "$@"; do printf '%s\n' "$a" >> "$ff"; done
+                   echo "added to $kind list: $*" ;;
+        esac ;;
     status)
         show_status ;;
     ui)
@@ -823,6 +918,8 @@ Usage: dsort <command>   (bare = interactive UI)
   undo                move the last run's files back
   stats               file counts / sizes per category
   rules               list custom ~/.downloads-rules.conf rules
+  exclude [.. |clear]  categories/extensions to never sort (bare = list)
+  only [.. |clear]     sort ONLY these categories/extensions (bare = list)
   log [n]             last n log lines (default 15)
   notify on|off       "Downloads sorted" notifications
   cleannames on|off   opt-in filename cleanup

@@ -85,6 +85,43 @@ if [ -r "$RULES_FILE" ]; then
     done < "$RULES_FILE"
 fi
 
+# Scope filter (managed from the menu). Two optional lists, one entry per line —
+# each entry is a category name (Media, Documents/PDFs…) or a bare extension (dmg):
+#   .exclude — files matching these are left where they are (their folder is never created)
+#   .only    — if non-empty, ONLY files matching these are sorted; the rest are left alone
+EXCLUDE_FILE="$HOME/Library/Scripts/organize_downloads.exclude"
+ONLY_FILE="$HOME/Library/Scripts/organize_downloads.only"
+EXCLUDE=(); ONLY=()
+_load_into() {                # $1=file  $2=array-name — append trimmed, non-comment lines
+    [ -r "$1" ] || return 0
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+        case "$line" in ''|'#'*) continue ;; esac
+        eval "$2+=(\"\$line\")"
+    done < "$1"
+}
+_load_into "$EXCLUDE_FILE" EXCLUDE
+_load_into "$ONLY_FILE" ONLY
+
+# _filter_match <ext> <rel> <array-name> -> 0 if the file matches any list entry
+# (bare extension match, or a category that equals/prefixes the destination)
+_filter_match() {
+    local ext="$1" rel="$2" e
+    eval "set -- \"\${$3[@]}\""
+    for e in "$@"; do
+        [ "$ext" = "$e" ] && return 0
+        case "$rel" in "$e"|"$e"/*) return 0 ;; esac
+    done
+    return 1
+}
+# in_scope <ext> <rel> -> 0 if this file should be sorted, 1 to leave it alone
+in_scope() {
+    [ ${#ONLY[@]} -gt 0 ] && { _filter_match "$1" "$2" ONLY || return 1; }
+    [ ${#EXCLUDE[@]} -gt 0 ] && { _filter_match "$1" "$2" EXCLUDE && return 1; }
+    return 0
+}
+
 # Live category folders we manage. The archive sweep walks exactly these, so any
 # folder you create yourself in Downloads is left completely untouched.
 # NOTE: "Archive" is deliberately NOT listed — we never re-archive Archive.
@@ -345,6 +382,10 @@ scan() {
             continue
         fi
 
+        rel=$(classify "$base")
+        # respect the user's exclude / only-sort filter — leave out-of-scope files put
+        in_scope "$ext" "$rel" || continue
+
         # big-file quarantine overrides normal categorisation (parked for review)
         if [ "$LARGEFILE_BYTES" -gt 0 ]; then
             sz=$(stat -f %z "$f" 2>/dev/null)
@@ -353,7 +394,6 @@ scan() {
                 continue
             fi
         fi
-        rel=$(classify "$base")
         # screenshots -> date-prefix + month bucket
         if [ "$rel" = "Screenshots" ] && screenshot_on; then
             IFS=$'\t' read -r ssrel ssname <<< "$(screenshot_target "$base" "$f")"
@@ -433,6 +473,10 @@ preview() {
         ext=$(echo "${base##*.}" | tr '[:upper:]' '[:lower:]')
         case "$ext" in crdownload|download|part|partial|tmp|opdownload|aria2|'!ut') continue ;; esac
         rel=$(classify "$base")
+        if ! in_scope "$ext" "$rel"; then
+            printf '%s\n    → (skipped — excluded by your filter)\n' "$base"
+            count=$((count+1)); continue
+        fi
         if [ "$LARGEFILE_BYTES" -gt 0 ]; then
             sz=$(stat -f %z "$f" 2>/dev/null)
             [ -n "$sz" ] && [ "$sz" -ge "$LARGEFILE_BYTES" ] && rel="Large Files"
