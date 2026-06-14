@@ -17,8 +17,8 @@ A lightweight macOS tool that keeps your **Downloads folder tidy automatically**
 ## Install
 
 ```sh
-git clone https://github.com/Lucid06-K/downloads-sorter.git
-cd downloads-sorter
+git clone https://github.com/Lucid06-K/mac-downloads-sorter.git
+cd mac-downloads-sorter
 ./install.sh
 ```
 
