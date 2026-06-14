@@ -193,6 +193,23 @@ Entries are either a **category** (`Media`, `Documents/PDFs`, …) or a bare **f
 
 ---
 
+## Updating
+
+```sh
+dsort update     # check GitHub and install the latest version
+dsort version    # what you have installed now
+```
+
+Or use **Check for updates** in the menu. Turn on **Settings → Auto‑update** to have it check once a day (when you open the menu) and install verified updates automatically — it's **off by default**.
+
+**How updates are kept safe:**
+- Downloads come **over HTTPS only**, pinned to this repository (redirects are also forced to HTTPS).
+- They're verified against the repo's published **SHA‑256 checksums** — a mismatch (corruption or tampering) aborts the update.
+- They're **syntax‑checked** before anything is replaced, and the current scripts are backed up to `*.bak`.
+- Everything runs in **user space — never `sudo`**.
+
+Checksum + HTTPS verification protects the download path; for a manual update you can review the diff on GitHub first. As with any auto‑updater you are ultimately trusting the source repo, which is why auto‑update is opt‑in.
+
 ## Uninstall
 
 ```sh
@@ -209,4 +226,4 @@ macOS (uses `launchd`, `osacompile`, `ditto`, `mdls` — all built in). No Homeb
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[Apache License 2.0](LICENSE) — © 2026 Lucid06‑K.

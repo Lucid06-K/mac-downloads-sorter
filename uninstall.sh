@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Lucid06-K
+# SPDX-License-Identifier: Apache-2.0
+#
 # Downloads Sorter — uninstaller. Removes the tool, its helper apps, the launch
 # agent, and its settings. Your ~/Downloads folders and files are NOT touched.
 set -uo pipefail

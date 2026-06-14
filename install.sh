@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Lucid06-K
+# SPDX-License-Identifier: Apache-2.0
+#
 # Downloads Sorter — installer.
 #
 # Installs the auto-sorter for the CURRENT user (no sudo, nothing system-wide):

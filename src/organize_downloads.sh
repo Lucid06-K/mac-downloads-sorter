@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Lucid06-K
+# SPDX-License-Identifier: Apache-2.0
+#
 # organize_downloads.sh — rule-based Downloads sorter, triggered by launchd.
 #
 # Phase 1: sorts loose files at the top of ~/Downloads into a nested category
