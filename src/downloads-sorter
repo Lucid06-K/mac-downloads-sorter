@@ -41,7 +41,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.15"
+VERSION="1.0.16"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -61,8 +61,8 @@ dedup_is_on()  { [ ! -e "$DEDUP_FLAG" ]; }   # duplicates -> Duplicates/, defaul
 ss_is_on()     { [ ! -e "$SS_FLAG" ]; }      # screenshot date-prefix + buckets, default ON
 meta_is_on()   { [ -e "$META_FLAG" ]; }      # PDF metadata naming, opt-in OFF
 unzip_is_on()  { [ -e "$AUTOUNZIP_FLAG" ]; } # auto-unzip .zip, opt-in OFF
-filter_count() { local f; [ "$1" = only ] && f="$ONLY_FILE" || f="$EXCLUDE_FILE"; [ -r "$f" ] && grep -cvE '^[[:space:]]*(#|$)' "$f" 2>/dev/null || echo 0; }
-rules_count()  { [ -r "$HOME/.downloads-rules.conf" ] && grep -hcE '\->|→' "$HOME/.downloads-rules.conf" 2>/dev/null || echo 0; }
+filter_count() { local f n=0; [ "$1" = only ] && f="$ONLY_FILE" || f="$EXCLUDE_FILE"; [ -r "$f" ] && n=$(grep -cvE '^[[:space:]]*(#|$)' "$f" 2>/dev/null); echo "${n:-0}"; }
+rules_count()  { local n=0; [ -r "$HOME/.downloads-rules.conf" ] && n=$(grep -hcE '\->|→' "$HOME/.downloads-rules.conf" 2>/dev/null); echo "${n:-0}"; }
 colors_count() { local n=0; [ -r "$COLORS_FILE" ] && n=$(grep -cE '\|' "$COLORS_FILE" 2>/dev/null); echo "${n:-0}"; }
 autoupdate_on() { [ -e "$AUTOUPDATE_FLAG" ]; }   # auto-install updates, opt-in OFF
 get_largefile() {
@@ -126,6 +126,7 @@ get_grace() {
 set_grace() {
     local s="$1"
     case "$s" in ""|*[!0-9]*) return 1 ;; esac
+    s=$((10#$s))                             # normalise (avoid octal on leading 0)
     [ "$s" -gt 2764799 ] && return 1         # max 31d 23h 59m 59s
     printf '%s\n' "$s" > "$GRACEFILE"
 }
@@ -852,7 +853,7 @@ prompt_archivedays() {
 form_grace() {
     local cur focus=0 k i tot nv
     local labels=(Days Hours Minutes Seconds) maxes=(31 23 59 59)
-    cur=$(get_grace)
+    cur=$(get_grace); cur=$((10#${cur:-0}))      # base-10 (avoid octal on leading 0)
     local vals=( $((cur/86400)) $(((cur%86400)/3600)) $(((cur%3600)/60)) $((cur%60)) )
     while :; do
         tot=$(( vals[0]*86400 + vals[1]*3600 + vals[2]*60 + vals[3] ))
