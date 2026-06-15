@@ -120,7 +120,7 @@ dsort autounzip on|off
 
 # tunables (d = default)
 dsort interval [seconds|d]
-dsort graceperiod [seconds|d]   # settle time before sorting (0 = immediate, max 7 days)
+dsort graceperiod [seconds|d]   # settle time before sorting (0 = immediate, max 31 days)
 dsort archivedays [days|d]
 dsort largefiles [GB|d]     # 0 = off
 dsort recentcount [0-10|d]  # recent moves listed under the main menu (0 = hide)
@@ -149,7 +149,7 @@ dsort on|off          # enable/disable the whole sorter
 - **Auto‑unzip** — expands `.zip` files into a same‑named subfolder (size‑guarded against zip‑bombs; contents are not re‑sorted).
 - **Weekly digest** — a once‑a‑week notification summarising what got sorted that week (file count, archived count, top categories). Silent in weeks with no activity.
 
-**Tunables** — the auto‑run interval, grace period, and big‑file size are arrow‑key pickers (the grace period spans seconds → days, up to 7 days); archive age and recent‑count are number entries. Each marks its **default** so you can always get back to a sensible setting.
+**Tunables** — the auto‑run interval and big‑file size are arrow‑key pickers; the grace period is a **Days/Hours/Minutes/Seconds form** (type a number in each field — they add up, e.g. Minutes 1 + Seconds 30 = 1m 30s — up to 31 days); archive age and recent‑count are number entries. Each marks its **default** so you can always get back to a sensible setting.
 
 ### Custom rules
 

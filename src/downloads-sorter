@@ -41,7 +41,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.14"
+VERSION="1.0.15"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -126,7 +126,7 @@ get_grace() {
 set_grace() {
     local s="$1"
     case "$s" in ""|*[!0-9]*) return 1 ;; esac
-    [ "$s" -gt 604800 ] && return 1          # max 7 days
+    [ "$s" -gt 2764799 ] && return 1         # max 31d 23h 59m 59s
     printf '%s\n' "$s" > "$GRACEFILE"
 }
 
@@ -143,19 +143,18 @@ set_recent_count() {
     [ "$n" -gt 10 ] && return 1
     printf '%s\n' "$n" > "$RECENTFILE"
 }
-# friendly seconds label: "0s (immediate)", "45s", "2m", "1m 30s"
+# friendly label with all nonzero parts:
+# "0s (immediate)", "30s", "1m 30s", "2h 5m", "31d 23h 59m 59s"
 fmt_grace() {
-    local s="$1"
+    local s="$1" out="" dd hh mm ss
     case "$s" in ''|*[!0-9]*) echo "$s"; return ;; esac
     [ "$s" -eq 0 ] && { echo "0s (immediate)"; return; }
-    if [ "$s" -lt 120 ]; then echo "${s}s"
-    elif [ "$s" -lt 3600 ]; then
-        if [ $((s % 60)) -eq 0 ]; then echo "$((s/60))m"; else echo "$((s/60))m $((s%60))s"; fi
-    elif [ "$s" -lt 86400 ]; then
-        if [ $((s % 3600)) -eq 0 ]; then echo "$((s/3600))h"; else echo "$((s/3600))h $(((s%3600)/60))m"; fi
-    else
-        if [ $((s % 86400)) -eq 0 ]; then echo "$((s/86400))d"; else echo "$((s/86400))d $(((s%86400)/3600))h"; fi
-    fi
+    dd=$((s/86400)); hh=$(((s%86400)/3600)); mm=$(((s%3600)/60)); ss=$((s%60))
+    [ "$dd" -gt 0 ] && out="$out${dd}d "
+    [ "$hh" -gt 0 ] && out="$out${hh}h "
+    [ "$mm" -gt 0 ] && out="$out${mm}m "
+    [ "$ss" -gt 0 ] && out="$out${ss}s "
+    echo "${out% }"
 }
 
 # --- undo history (a stack of moves) ------------------------------------
@@ -848,35 +847,39 @@ prompt_archivedays() {
     esac
 }
 
-# arrow-key picker for the grace period — spans seconds → days, up to 7 days
-pick_grace() {
-    local opts=(0 30 60 300 900 3600 21600 43200 86400 259200 604800)
-    local labels=("Immediate — sort right away" "30 seconds" "1 minute" "5 minutes" "15 minutes" "1 hour" "6 hours" "12 hours" "1 day" "3 days" "7 days")
-    local cur sel=2 i k mark curmark
+# grace period as a Days/Hours/Minutes/Seconds form — type a number in each
+# field (they add up). e.g. Minutes=1, Seconds=30 -> 1m 30s (90s). Max 31d.
+form_grace() {
+    local cur focus=0 k i tot nv
+    local labels=(Days Hours Minutes Seconds) maxes=(31 23 59 59)
     cur=$(get_grace)
-    for i in "${!opts[@]}"; do [ "${opts[$i]}" = "$cur" ] && sel="$i"; done
+    local vals=( $((cur/86400)) $(((cur%86400)/3600)) $(((cur%3600)/60)) $((cur%60)) )
     while :; do
+        tot=$(( vals[0]*86400 + vals[1]*3600 + vals[2]*60 + vals[3] ))
         printf '\033[H\033[2J'
-        printf '\n  %sGrace period%s\n' "$BLD" "$R"
-        printf '  %sHow long a new download must sit still before it gets sorted.%s\n' "$DIM" "$R"
-        printf '  %sLonger is safer for big or slow downloads.%s\n\n' "$DIM" "$R"
-        for i in "${!opts[@]}"; do
-            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_GRACE" ] && mark=" ${DIM}· default${R}"
-            curmark=""; [ "${opts[$i]}" = "$cur" ] && curmark=" ${GRN}· current${R}"
-            if [ "$i" -eq "$sel" ]; then
-                printf '   %s ▸ %2d. %-26s %s%s%s\n' "$REV" "$((i+1))" "${labels[$i]}" "$R" "$mark" "$curmark"
-            else
-                printf '     %2d. %-26s%s%s\n' "$((i+1))" "${labels[$i]}" "$mark" "$curmark"
-            fi
+        printf '\n  %sGrace period%s  %s— how long a download settles before sorting%s\n' "$BLD" "$R" "$DIM" "$R"
+        printf '  %sType a number in each field; they add up. Default %ss.%s\n\n' "$DIM" "$RECOMMENDED_GRACE" "$R"
+        for i in 0 1 2 3; do
+            if [ "$i" -eq "$focus" ]; then printf '   %s ▸ %-8s [ %2s ] %s %s(0–%s)%s\n' "$REV" "${labels[$i]}" "${vals[$i]}" "$R" "$DIM" "${maxes[$i]}" "$R"
+            else printf '     %-8s [ %2s ]   %s(0–%s)%s\n' "${labels[$i]}" "${vals[$i]}" "$DIM" "${maxes[$i]}" "$R"; fi
         done
-        printf '\n  %s↑/↓ move · 1-9 jump · enter select · esc cancel%s' "$DIM" "$R"
+        printf '  %s\n' "${DIM}────────────────────────────${R}"
+        printf '   %sTotal:%s %s\n' "$BLD" "$R" "$(fmt_grace "$tot")"
+        printf '  %s\n' "${DIM}────────────────────────────${R}"
+        if [ "$focus" -eq 4 ]; then printf '  %s ▸ Save%s\n' "$REV" "$R"; else printf '     Save\n'; fi
+        printf '\n  %s↑/↓ field · type digits · ⌫ delete · enter save · esc cancel%s\n' "$DIM" "$R"
         k=$(read_key)
         case "$k" in
-            up|k)   sel=$(( (sel + ${#opts[@]} - 1) % ${#opts[@]} )) ;;
-            down|j) sel=$(( (sel + 1) % ${#opts[@]} )) ;;
-            [1-9])  sel=$((k-1)) ;;
-            "")     set_grace "${opts[$sel]}" && MSG="Grace period → $(fmt_grace "${opts[$sel]}")" || MSG="Could not set grace period"; return ;;
-            q|esc)  MSG="Grace period unchanged"; return ;;
+            up|k)   focus=$(( (focus + 4) % 5 )) ;;
+            down|j) focus=$(( (focus + 1) % 5 )) ;;
+            esc|q)  MSG="Grace period unchanged"; return ;;
+            [0-9])  if [ "$focus" -lt 4 ]; then
+                        nv=$(( vals[focus]*10 + k ))
+                        [ "$nv" -gt "${maxes[$focus]}" ] && nv="$k"
+                        vals[$focus]=$nv
+                    fi ;;
+            $'\177'|$'\b') [ "$focus" -lt 4 ] && vals[$focus]=$(( vals[focus] / 10 )) ;;
+            "")     set_grace "$tot" && MSG="Grace period → $(fmt_grace "$tot")" || MSG="Could not set grace period"; return ;;
         esac
     done
 }
@@ -1566,7 +1569,7 @@ activate() {
             0)  toggle_notify ;;
             1)  toggle_cleannames ;;
             2)  pick_interval ;;
-            3)  pick_grace ;;
+            3)  form_grace ;;
             4)  prompt_archivedays ;;
             5)  toggle_aging ;;
             6)  toggle_duplicates ;;
@@ -1732,7 +1735,7 @@ case "$1" in
         if [ -n "$2" ]; then
             case "$2" in
                 r|recommended|d|default) set_grace "$RECOMMENDED_GRACE" && echo "Grace period: $(fmt_grace "$RECOMMENDED_GRACE")" ;;
-                *) if set_grace "$2"; then echo "Grace period: $(fmt_grace "$2") before a download is sorted"; else echo "Invalid (whole seconds, 0–604800 / max 7 days; 0 = immediate)." >&2; exit 1; fi ;;
+                *) if set_grace "$2"; then echo "Grace period: $(fmt_grace "$2") before a download is sorted"; else echo "Invalid (whole seconds, 0–2764799 / max 31 days; 0 = immediate)." >&2; exit 1; fi ;;
             esac
         else
             echo "Grace period: $(fmt_grace "$(get_grace)") (default ${RECOMMENDED_GRACE}s)"
