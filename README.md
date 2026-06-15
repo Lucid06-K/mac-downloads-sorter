@@ -183,6 +183,7 @@ Entries are either a **category** (`Media`, `Documents/PDFs`, …) or a bare **f
 - **Never deletes or overwrites.** Moves use a no‑clobber strategy and add ` (2)` on a name clash.
 - **Everything is logged** to `~/Library/Logs/organize-downloads.log`.
 - **Undo** keeps a history stack: revert individual changes, or whole runs, and keep stepping back run‑by‑run (`dsort undo`, repeatable; or pick items in the menu's Undo screen).
+- **Undo reaches back to past sortings too.** The first time you open Undo it rebuilds revertable entries from the activity log for any sorted file still sitting in its folder — so moves made before you had the latest version can still be undone. (Reconstruction is conservative: it only offers a file that's actually still at its sorted location, and — as always — only ever moves files back, never deletes.)
 - The 30‑day archive only **moves** files (into `Archive/`) — it never removes them, and the aging nudge only *reminds* you.
 
 ---
