@@ -21,6 +21,7 @@ TARGET="gui/$(id -u)/$LABEL"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/organize-downloads.log"
 NONOTIFY_FLAG="$HOME/Library/Scripts/organize_downloads.nonotify"
+DETECT_FLAG="$HOME/Library/Scripts/organize_downloads.detectnotify"
 CLEANFLAG="$HOME/Library/Scripts/organize_downloads.cleannames"
 AGEFILE="$HOME/Library/Scripts/organize_downloads.archivedays"
 GRACEFILE="$HOME/Library/Scripts/organize_downloads.graceperiod"
@@ -41,7 +42,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.20"
+VERSION="1.0.21"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -54,6 +55,7 @@ R=$'\033[0m'; REV=$'\033[7m'; DIM=$'\033[2m'; GRN=$'\033[32m'; BLD=$'\033[1m'; Y
 
 is_loaded()    { launchctl print "$TARGET" >/dev/null 2>&1; }
 notify_is_on() { [ ! -e "$NONOTIFY_FLAG" ]; }
+detect_is_on() { [ -e "$DETECT_FLAG" ]; }   # heads-up when a download is detected (opt-in)
 clean_is_on()  { [ -e "$CLEANFLAG" ]; }
 aging_is_on()  { [ ! -e "$AGING_FLAG" ]; }   # weekly Archive nudge, default ON
 digest_is_on() { [ -e "$DIGEST_FLAG" ]; }    # weekly activity digest, opt-in (default OFF)
@@ -474,6 +476,7 @@ show_status() {
     local iv ad; iv=$(get_interval); ad=$(get_archivedays)
     if is_loaded; then echo "Sorter: ON (loaded)"; else echo "Sorter: OFF (not loaded)"; fi
     notify_is_on && echo "Notifications: ON" || echo "Notifications: OFF"
+    detect_is_on && echo "Detected heads-up: ON (banner when a download is spotted)" || echo "Detected heads-up: OFF (opt-in)"
     clean_is_on  && echo "Filename cleanup: ON" || echo "Filename cleanup: OFF"
     aging_is_on  && echo "Aging nudge (weekly, Archive >1yr): ON" || echo "Aging nudge: OFF"
     digest_is_on && echo "Weekly digest: ON (once-a-week summary)" || echo "Weekly digest: OFF (opt-in)"
@@ -554,7 +557,7 @@ describe_main() {
 }
 describe_settings() {
     case "$1" in
-        0)  echo "Show a banner after each sort, summarizing what moved where." ;;
+        0)  echo "Notifications: the after-sort summary, plus an opt-in heads-up when a download is detected." ;;
         1)  echo "Tidy messy download names before filing — off by default, logged & undoable." ;;
         2)  echo "How often the backup timer runs; new files sort instantly via folder-watching." ;;
         3)  echo "How long a new download must sit still before it's sorted (0 = immediately)." ;;
@@ -598,11 +601,10 @@ _draw_body() {
     else
         s_plain="Sorter             ○ OFF"; s_col="Sorter             ${DIM}○ OFF${R}"
     fi
-    if notify_is_on; then
-        n_plain="Notifications      ● ON";  n_col="Notifications      ${GRN}● ON${R}"
-    else
-        n_plain="Notifications      ○ OFF"; n_col="Notifications      ${DIM}○ OFF${R}"
-    fi
+    local n_sum
+    if notify_is_on; then detect_is_on && n_sum="on + heads-up" || n_sum="on"; else n_sum="off"; fi
+    n_plain="Notifications ▸"
+    n_col="Notifications ▸  ${DIM}($n_sum)${R}"
     if clean_is_on; then
         c_plain="Filename cleanup   ● ON";  c_col="Filename cleanup   ${GRN}● ON${R}"
     else
@@ -751,6 +753,46 @@ toggle_sorter() {
 toggle_notify() {
     if notify_is_on; then touch "$NONOTIFY_FLAG"; MSG="Notifications turned OFF"
     else rm -f "$NONOTIFY_FLAG"; MSG="Notifications turned ON"; fi
+}
+toggle_detect() {
+    if detect_is_on; then rm -f "$DETECT_FLAG"; MSG="Detected heads-up OFF"
+    else touch "$DETECT_FLAG"; MSG="Detected heads-up ON — banner when a download is spotted"; fi
+}
+# nested Notifications submenu: master on/off + the detected heads-up opt-in
+do_notifications() {
+    local focus=0 key frame s_on d_on desc
+    printf '\033[?25l'
+    while :; do
+        notify_is_on && s_on="${GRN}● ON${R}"  || s_on="${DIM}○ OFF${R}"
+        detect_is_on && d_on="${GRN}● ON${R}"  || d_on="${DIM}○ OFF${R}"
+        case "$focus" in
+            0) desc="Banner after each sort, summarising what moved where." ;;
+            1) desc="Heads-up the moment a download is spotted: where it'll go + the wait." ;;
+            *) desc="Return to Settings." ;;
+        esac
+        frame=$(
+            printf '\n  %sNotifications%s\n' "$BLD" "$R"
+            printf '  %s──────────────────────────────────────────────%s\n' "$DIM" "$R"
+            if [ "$focus" -eq 0 ]; then printf '  %s ▸ %-22s%s %s\n' "$REV" "Sort summary" "$R" "$s_on"
+            else printf '     %-22s %s\n' "Sort summary" "$s_on"; fi
+            if [ "$focus" -eq 1 ]; then printf '  %s ▸ %-22s%s %s\n' "$REV" "Detected heads-up" "$R" "$d_on"
+            else printf '     %-22s %s\n' "Detected heads-up" "$d_on"; fi
+            printf '  %s──────────────────────────────────────────────%s\n' "$DIM" "$R"
+            if [ "$focus" -eq 2 ]; then printf '  %s ▸ ← Back%s\n' "$REV" "$R"; else printf '     ← Back\n'; fi
+            printf '\n  %s➜ %s%s\n' "$DIM" "$desc" "$R"
+            printf '  %s\n' "${GRN}${MSG}${R}"
+            printf '  %s↑/↓ move · enter toggle · esc back%s\n' "$DIM" "$R"
+        )
+        _paint "$frame"
+        key=$(read_key)
+        case "$key" in
+            up|k)   focus=$(( (focus + 2) % 3 )) ;;
+            down|j) focus=$(( (focus + 1) % 3 )) ;;
+            esc|q)  break ;;
+            "")     case "$focus" in 0) toggle_notify ;; 1) toggle_detect ;; 2) break ;; esac ;;
+        esac
+    done
+    printf '\033[?25l'; MSG="Notifications updated"
 }
 
 toggle_cleannames() {
@@ -1259,7 +1301,7 @@ EOF
        dsort colours [..]       Finder colour tags for category folders
        dsort log [n]            recent activity
 
-       dsort notify | cleannames | aging | duplicates   on|off
+       dsort notify | detect | cleannames | aging | duplicates   on|off
        dsort screenshotdate | metanames | autounzip | autoupdate   on|off
        dsort digest on|off      weekly "what got sorted" summary
 
@@ -1595,7 +1637,7 @@ do_colors() {
 activate() {
     if [ "$SCREEN" = settings ]; then
         case "$focus" in
-            0)  toggle_notify ;;
+            0)  do_notifications ;;
             1)  toggle_cleannames ;;
             2)  pick_interval ;;
             3)  form_grace ;;
@@ -1682,6 +1724,12 @@ case "$1" in
             on)  rm -f "$NONOTIFY_FLAG"; echo "Notifications: ON" ;;
             off) touch "$NONOTIFY_FLAG"; echo "Notifications: OFF" ;;
             *)   notify_is_on && echo "Notifications: ON" || echo "Notifications: OFF" ;;
+        esac ;;
+    detect|detectnotify)
+        case "$2" in
+            on)  touch "$DETECT_FLAG"; echo "Detected heads-up: ON" ;;
+            off) rm -f "$DETECT_FLAG"; echo "Detected heads-up: OFF" ;;
+            *)   detect_is_on && echo "Detected heads-up: ON" || echo "Detected heads-up: OFF (opt-in)" ;;
         esac ;;
     cleannames)
         case "$2" in
@@ -1833,6 +1881,7 @@ Usage: dsort <command>   (bare = interactive UI)
   only [.. |clear]     sort ONLY these categories/extensions (bare = list)
   log [n]             last n log lines (default 15)
   notify on|off       "Downloads sorted" notifications
+  detect on|off       opt-in heads-up when a download is detected (where + wait)
   cleannames on|off   opt-in filename cleanup
   aging on|off        weekly nudge for Archive files over a year old
   digest on|off       opt-in: weekly summary of what got sorted

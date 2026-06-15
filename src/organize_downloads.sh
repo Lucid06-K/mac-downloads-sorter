@@ -56,6 +56,32 @@ HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 # notification applet + mute flag (shared by notify() and the weekly aging nudge)
 NOTIFIER="$HOME/Library/Scripts/DownloadsNotifier.app/Contents/MacOS/applet"
 NONOTIFY_FLAG="$HOME/Library/Scripts/organize_downloads.nonotify"
+# opt-in "heads-up" notification when a fresh download is detected (before its
+# grace period elapses): says where it WILL go and the wait. ON only while the
+# flag exists AND notifications aren't globally muted. ANNOUNCED de-dups repeats.
+DETECT_FLAG="$HOME/Library/Scripts/organize_downloads.detectnotify"
+ANNOUNCED="$HOME/Library/Scripts/.organize_downloads.announced"
+detect_notif_on() { [ -e "$DETECT_FLAG" ] && [ ! -e "$NONOTIFY_FLAG" ]; }
+# compact seconds label for the heads-up ("45s", "2m", "1m 30s")
+fmt_secs() {
+    local s="$1"; [ "$s" -lt 1 ] && s=1
+    if [ "$s" -lt 60 ]; then echo "${s}s"
+    elif [ $((s % 60)) -eq 0 ]; then echo "$((s/60))m"
+    else echo "$((s/60))m $((s%60))s"; fi
+}
+# announce a detected download once (deduped within ~2 grace periods). Body is
+# ASCII so the env-passed text renders cleanly in the notification.
+announce_detected() {
+    local file="$1" rel="$2" wait="$3" now base
+    now=$(date +%s); base=$(basename "$file")
+    if [ -f "$ANNOUNCED" ] && \
+       awk -F'\t' -v p="$file" -v n="$now" -v w=$((MIN_AGE*2+10)) '$2==p && (n-$1)<w {f=1} END{exit !f}' "$ANNOUNCED"; then
+        return 0                                   # already announced recently
+    fi
+    { [ -f "$ANNOUNCED" ] && awk -F'\t' -v n="$now" '(n-$1)<3600' "$ANNOUNCED"
+      printf '%s\t%s\n' "$now" "$file"; } > "$ANNOUNCED.tmp" 2>/dev/null && mv "$ANNOUNCED.tmp" "$ANNOUNCED" 2>/dev/null
+    DSORT_BODY="$base -> $rel  (sorting in ~$(fmt_secs "$wait"))" DSORT_TITLE="Download detected" "$NOTIFIER" >/dev/null 2>>"$LOG"
+}
 
 # weekly "old stuff in Archive" nudge — never deletes; OFF while .noaging exists
 AGING_DAYS=365
@@ -445,6 +471,18 @@ scan() {
             YOUNG_SKIPPED=1
             need=$((MIN_AGE - (now - mtime)))
             [ $need -gt $WAIT ] && WAIT=$need
+            # opt-in heads-up: tell the user where this download will be filed
+            if detect_notif_on; then
+                local drel dsz
+                drel=$(classify "$base" "$f")
+                if in_scope "$ext" "$drel"; then
+                    if [ "$LARGEFILE_BYTES" -gt 0 ]; then
+                        dsz=$(stat -f %z "$f" 2>/dev/null)
+                        [ -n "$dsz" ] && [ "$dsz" -ge "$LARGEFILE_BYTES" ] && drel="Large Files"
+                    fi
+                    announce_detected "$f" "$drel" "$need"
+                fi
+            fi
             continue
         fi
 

@@ -110,6 +110,7 @@ dsort log [n]         # recent activity
 
 # toggles
 dsort notify on|off
+dsort detect on|off       # opt-in heads-up when a download is detected (where it'll go + wait)
 dsort cleannames on|off
 dsort aging on|off
 dsort digest on|off       # opt-in: weekly "what got sorted" summary notification
@@ -141,7 +142,7 @@ dsort on|off          # enable/disable the whole sorter
 - **Big‑file quarantine** — files at/above the threshold (default **5 GB**) go to `Large Files/` so you deal with them deliberately. `Duplicates/` and `Large Files/` are never auto‑archived.
 - **Screenshot dating** — `Screen Shot …` / `SCR-…` become `2026-06-14 Screenshot.png`, filed into `Screenshots/YYYY-MM/`.
 - **Aging nudge** — a weekly heads‑up if `Archive/` holds anything over a year old. It **never deletes**.
-- **Notifications** — a banner after each sort, grouped by category (e.g. “3 → Documents/PDFs, 2 → Media/Images”).
+- **Notifications** — a banner after each sort, grouped by category (e.g. “3 -> Documents/PDFs, 2 -> Media/Images”). Opt‑in **detected heads‑up** (Settings → Notifications) also pops a banner the moment a download is spotted, showing where it’ll go and the grace‑period wait (e.g. “report.pdf -> Documents/PDFs (sorting in ~2m)”).
 
 **Opt‑in (OFF until you turn them on)**
 - **Filename cleanup** — tidies messy names: strips URL junk (`%20`, `?token=…`), long random hash blobs, and trailing `copy`/`v2`. Conservative by design (it protects real names like `Chapter_03_Glycolysis`), and every rename is logged and undoable.
