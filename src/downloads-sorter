@@ -34,9 +34,10 @@ ONLY_FILE="$HOME/Library/Scripts/organize_downloads.only"
 AUTOUPDATE_FLAG="$HOME/Library/Scripts/organize_downloads.autoupdate"
 UPDATE_STAMP="$HOME/Library/Scripts/.organize_downloads.update_check"
 UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
+HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.3"
+VERSION="1.0.4"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -107,20 +108,60 @@ set_archivedays() {
     printf '%s\n' "$d" > "$AGEFILE"
 }
 
-# undo the most recent recorded run (sort or migration): move each file back to
-# its original path. Never deletes; skips anything whose origin is now occupied.
+# --- undo history (a stack of moves) ------------------------------------
+# load history newest-first into U_STAMP / U_OLD / U_NEW
+_undo_load() {
+    U_STAMP=(); U_OLD=(); U_NEW=()
+    [ -r "$HISTORY_FILE" ] || return 0
+    local s o n
+    while IFS=$'\t' read -r s o n; do
+        [ -n "$o" ] && [ -n "$n" ] || continue
+        U_STAMP+=("$s"); U_OLD+=("$o"); U_NEW+=("$n")
+    done < <(tail -r "$HISTORY_FILE" 2>/dev/null)
+}
+# move one file back (new -> old). never deletes; never clobbers an occupied origin
+_undo_one() {
+    local new="$1" old="$2"
+    [ -e "$new" ] || return 1               # already gone
+    [ -e "$old" ] && return 2               # something is back at the origin — skip
+    mkdir -p "$(dirname "$old")"
+    mv -n "$new" "$old" 2>/dev/null && return 0 || return 1
+}
+# drop history lines whose 'new' path appears (one per line) in file $1
+_undo_purge() {
+    [ -r "$HISTORY_FILE" ] || return 0
+    local s o n
+    : > "$HISTORY_FILE.tmp"
+    while IFS=$'\t' read -r s o n; do
+        grep -qxF -- "$n" "$1" 2>/dev/null && continue
+        printf '%s\t%s\t%s\n' "$s" "$o" "$n" >> "$HISTORY_FILE.tmp"
+    done < "$HISTORY_FILE"
+    mv "$HISTORY_FILE.tmp" "$HISTORY_FILE"
+}
+_undo_runs() {
+    [ -r "$HISTORY_FILE" ] || { echo 0; return; }
+    cut -f1 "$HISTORY_FILE" 2>/dev/null | sort -u | sed '/^$/d' | wc -l | tr -d ' '
+}
+
+# `dsort undo`: revert the most recent run; repeat to keep stepping back.
 run_undo() {
-    [ -s "$UNDO_FILE" ] || { echo "Nothing to undo (no recorded run)."; return; }
-    local n=0 skip=0 old new
-    while IFS=$'\t' read -r old new; do
-        [ -n "$old" ] && [ -n "$new" ] || continue
-        [ -e "$new" ] || { skip=$((skip+1)); continue; }       # already gone/moved
-        if [ -e "$old" ]; then echo "  skip (origin exists): $(basename "$old")"; skip=$((skip+1)); continue; fi
-        mkdir -p "$(dirname "$old")"
-        if mv -n "$new" "$old" 2>/dev/null; then n=$((n+1)); else skip=$((skip+1)); fi
-    done < "$UNDO_FILE"
-    mv -f "$UNDO_FILE" "$UNDO_FILE.undone" 2>/dev/null
-    echo "Undo: $n file(s) moved back$( [ "$skip" -gt 0 ] && echo ", $skip skipped" )."
+    # one-time migration of the legacy single-run file into the history stack
+    if [ -s "$UNDO_FILE" ] && [ ! -e "$HISTORY_FILE" ]; then
+        local l; while IFS= read -r l; do [ -n "$l" ] && printf '0\t%s\n' "$l" >> "$HISTORY_FILE"; done < "$UNDO_FILE"
+        rm -f "$UNDO_FILE"
+    fi
+    _undo_load
+    [ "${#U_NEW[@]}" -gt 0 ] || { echo "Nothing to undo."; return; }
+    local latest="${U_STAMP[0]}" n=0 skip=0 i purge; purge=$(mktemp)
+    for i in "${!U_NEW[@]}"; do
+        [ "${U_STAMP[$i]}" = "$latest" ] || continue
+        if _undo_one "${U_NEW[$i]}" "${U_OLD[$i]}"; then n=$((n+1)); else skip=$((skip+1)); fi
+        printf '%s\n' "${U_NEW[$i]}" >> "$purge"
+    done
+    _undo_purge "$purge"; rm -f "$purge"
+    local left; left=$(_undo_runs)
+    echo "Reverted $n file(s) from the most recent run$([ "$skip" -gt 0 ] && echo " ($skip skipped)")."
+    [ "${left:-0}" -gt 0 ] && echo "↩  Run 'dsort undo' again to revert the previous run — $left earlier run(s) left."
 }
 
 # dry-run preview and stats reuse the sorter's own classify()/MANAGED_DIRS by
@@ -323,7 +364,7 @@ describe_main() {
         0) echo "Master switch for the whole auto-sorter (persists across reboots)." ;;
         1) echo "Run a sort pass right now." ;;
         2) echo "Dry run: show where loose files WOULD go. Moves nothing." ;;
-        3) echo "Move the most recent run's files back where they came from." ;;
+        3) echo "Revert changes — tick individual files or whole runs; repeat to step back." ;;
         4) echo "File counts and sizes per category, plus last activity time." ;;
         5) echo "Recent moves and archives, newest first." ;;
         6) echo "Open Settings — schedule, archive age, and all the feature toggles." ;;
@@ -619,9 +660,63 @@ do_preview() {
     printf '\033[H\033[2J'; printf '\n  %sPreview — where loose files would go%s  %s(nothing moved)%s\n\n' "$BLD" "$R" "$DIM" "$R"
     run_preview 2>/dev/null | sed 's/^/  /'; _pause; MSG="Preview shown (no changes made)"
 }
+_undo_row() { if [ "$1" -eq "$2" ]; then printf '  %s ▸ %s%s\n' "$REV" "$3" "$R"; else printf '     %s\n' "$3"; fi; }
+
+# interactive undo: tick individual changes to revert, or revert whole runs;
+# the history is a stack, so reverting the latest run reveals the previous one
+# (keep going to step further back).
 do_undo() {
-    printf '\033[H\033[2J'; printf '\n  %sUndo last run%s\n\n' "$BLD" "$R"
-    run_undo 2>/dev/null | sed 's/^/  /'; _pause; MSG="Undo finished"
+    local focus=0 selected="" key i n show latest cnt nm oldp purge left m tg lrn nrows
+    printf '\033[?25l'
+    _undo_load                       # snapshot once so indices stay stable while you pick
+    while :; do
+        n=${#U_NEW[@]}; show=$n; [ "$show" -gt 50 ] && show=50
+        latest="${U_STAMP[0]:-}"; lrn=0
+        for i in "${!U_STAMP[@]}"; do [ "${U_STAMP[$i]}" = "$latest" ] && lrn=$((lrn+1)); done
+        printf '\033[H\033[2J'
+        printf '\n  %sUndo / revert changes%s  %s— newest first%s\n' "$BLD" "$R" "$DIM" "$R"
+        printf '  %s\n' "${DIM}──────────────────────────────────────────────${R}"
+        [ "$n" -eq 0 ] && printf '     %s(nothing to revert)%s\n' "$DIM" "$R"
+        for (( i=0; i<show; i++ )); do
+            case " $selected " in *" $i "*) m="[${GRN}✓${R}]" ;; *) m="[ ]" ;; esac
+            nm=$(basename "${U_NEW[$i]}"); oldp="${U_OLD[$i]/#$HOME\//~/}"
+            tg=""; [ "${U_STAMP[$i]}" = "$latest" ] && tg=" ${DIM}· latest${R}"
+            if [ "$i" -eq "$focus" ]; then printf '  %s ▸ %s %-26.26s%s ← %s\n' "$REV" "$m" "$nm" "$R" "$oldp"
+            else printf '     %s %-26.26s ← %s%s\n' "$m" "$nm" "$oldp" "$tg"; fi
+        done
+        [ "$n" -gt "$show" ] && printf '     %s…and %d older (revert runs to reach them)%s\n' "$DIM" "$((n-show))" "$R"
+        printf '  %s\n' "${DIM}──────────────────────────────────────────────${R}"
+        cnt=$(printf '%s' "$selected" | wc -w | tr -d ' ')
+        _undo_row $show       "$focus" "Revert selected ($cnt)"
+        _undo_row $((show+1)) "$focus" "Revert the latest run ($lrn file(s))"
+        _undo_row $((show+2)) "$focus" "← Back"
+        printf '\n  %s↑/↓ move · enter tick / run · esc back%s\n' "$DIM" "$R"
+        nrows=$((show+3))
+        key=$(read_key)
+        case "$key" in
+            up|k)   focus=$(( (focus + nrows - 1) % nrows )) ;;
+            down|j) focus=$(( (focus + 1) % nrows )) ;;
+            esc|q)  break ;;
+            "")
+                if [ "$focus" -lt "$show" ]; then
+                    case " $selected " in
+                        *" $focus "*) selected=$(printf '%s' "$selected" | tr ' ' '\n' | grep -vx "$focus" | tr '\n' ' ') ;;
+                        *) selected="$selected $focus" ;;
+                    esac
+                elif [ "$focus" -eq "$show" ]; then
+                    [ -n "$(printf '%s' "$selected" | tr -d ' ')" ] || { MSG="Nothing ticked"; continue; }
+                    purge=$(mktemp)
+                    for i in $selected; do _undo_one "${U_NEW[$i]}" "${U_OLD[$i]}"; printf '%s\n' "${U_NEW[$i]}" >> "$purge"; done
+                    _undo_purge "$purge"; rm -f "$purge"; selected=""; focus=0; _undo_load
+                elif [ "$focus" -eq $((show+1)) ]; then
+                    [ "$n" -gt 0 ] || { MSG="Nothing to revert"; continue; }
+                    purge=$(mktemp)
+                    for i in "${!U_STAMP[@]}"; do [ "${U_STAMP[$i]}" = "$latest" ] && { _undo_one "${U_NEW[$i]}" "${U_OLD[$i]}"; printf '%s\n' "${U_NEW[$i]}" >> "$purge"; }; done
+                    _undo_purge "$purge"; rm -f "$purge"; selected=""; focus=0; _undo_load
+                else break; fi ;;
+        esac
+    done
+    printf '\033[?25l'; MSG="Undo finished"
 }
 do_stats() {
     printf '\033[H\033[2J'; printf '\n  %sStats%s\n\n' "$BLD" "$R"
@@ -850,7 +945,8 @@ EOF
    •  Every move / rename / archive is logged to
       ~/Library/Logs/organize-downloads.log
 
-   •  "Undo last run" reverses the most recent batch
+   •  Undo lets you revert individual changes or whole runs, and keep
+      stepping back through the history — it only moves files, never deletes
 
    •  The 30-day Archive only MOVES files (into Archive/); the aging nudge
       only reminds you. Nothing is ever auto-deleted.

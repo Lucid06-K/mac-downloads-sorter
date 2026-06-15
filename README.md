@@ -101,7 +101,7 @@ dsort                 # open the menu
 dsort status          # show every current setting
 dsort run             # sort now
 dsort preview         # dry run — show where things would go (moves nothing)
-dsort undo            # move the last run's files back
+dsort undo            # revert the last run (repeat to keep stepping back)
 dsort stats           # counts + sizes per category
 dsort rules           # list your custom rules
 dsort log [n]         # recent activity
@@ -182,7 +182,7 @@ Entries are either a **category** (`Media`, `Documents/PDFs`, …) or a bare **f
 
 - **Never deletes or overwrites.** Moves use a no‑clobber strategy and add ` (2)` on a name clash.
 - **Everything is logged** to `~/Library/Logs/organize-downloads.log`.
-- **Undo** reverses the most recent run.
+- **Undo** keeps a history stack: revert individual changes, or whole runs, and keep stepping back run‑by‑run (`dsort undo`, repeatable; or pick items in the menu's Undo screen).
 - The 30‑day archive only **moves** files (into `Archive/`) — it never removes them, and the aging nudge only *reminds* you.
 
 ---

@@ -36,11 +36,14 @@ if [ -r "$AGEFILE" ]; then
     [ -n "$_ad" ] && [ "$_ad" -ge 1 ] 2>/dev/null && ARCHIVE_DAYS=$_ad
 fi
 
-# Records this run's moves as "old<TAB>new" so `downloads-sorter undo` can revert
-# them. Written to a .partial during the run, promoted to UNDO_FILE only if work
-# actually happened (so an empty run never clobbers a real undo history).
-UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
+# Undo history. Each move is recorded as "old<TAB>new" to a .partial during the
+# run; if the run did work, those lines are appended to HISTORY_FILE prefixed
+# with a run stamp ("stamp<TAB>old<TAB>new"). The history is a stack: `dsort
+# undo` reverts the most recent run and can be repeated to keep going back, and
+# the menu can revert individual entries. Bounded so it never grows unbounded.
+UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"   # legacy (kept for one-time migration)
 UNDO_PARTIAL="$UNDO_FILE.partial"
+HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 
 # notification applet + mute flag (shared by notify() and the weekly aging nudge)
 NOTIFIER="$HOME/Library/Scripts/DownloadsNotifier.app/Contents/MacOS/applet"
@@ -94,24 +97,23 @@ fi
 #   .only    — if non-empty, ONLY files matching these are sorted; the rest are left alone
 EXCLUDE_FILE="$HOME/Library/Scripts/organize_downloads.exclude"
 ONLY_FILE="$HOME/Library/Scripts/organize_downloads.only"
-EXCLUDE=(); ONLY=()
-_load_into() {                # $1=file  $2=array-name — append trimmed, non-comment lines
+# _read_list <file> — echo trimmed, non-comment lines (no eval; values stay data)
+_read_list() {
     [ -r "$1" ] || return 0
     local line
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
         case "$line" in ''|'#'*) continue ;; esac
-        eval "$2+=(\"\$line\")"
+        printf '%s\n' "$line"
     done < "$1"
 }
-_load_into "$EXCLUDE_FILE" EXCLUDE
-_load_into "$ONLY_FILE" ONLY
+EXCLUDE=(); while IFS= read -r _e; do EXCLUDE+=("$_e"); done < <(_read_list "$EXCLUDE_FILE")
+ONLY=();    while IFS= read -r _e; do ONLY+=("$_e");    done < <(_read_list "$ONLY_FILE")
 
-# _filter_match <ext> <rel> <array-name> -> 0 if the file matches any list entry
+# _filter_match <ext> <rel> <entries…> -> 0 if (ext,rel) matches any list entry
 # (bare extension match, or a category that equals/prefixes the destination)
 _filter_match() {
-    local ext="$1" rel="$2" e
-    eval "set -- \"\${$3[@]}\""
+    local ext="$1" rel="$2" e; shift 2
     for e in "$@"; do
         [ "$ext" = "$e" ] && return 0
         case "$rel" in "$e"|"$e"/*) return 0 ;; esac
@@ -120,8 +122,8 @@ _filter_match() {
 }
 # in_scope <ext> <rel> -> 0 if this file should be sorted, 1 to leave it alone
 in_scope() {
-    [ ${#ONLY[@]} -gt 0 ] && { _filter_match "$1" "$2" ONLY || return 1; }
-    [ ${#EXCLUDE[@]} -gt 0 ] && { _filter_match "$1" "$2" EXCLUDE && return 1; }
+    [ ${#ONLY[@]} -gt 0 ]    && { _filter_match "$1" "$2" "${ONLY[@]}"    || return 1; }
+    [ ${#EXCLUDE[@]} -gt 0 ] && { _filter_match "$1" "$2" "${EXCLUDE[@]}" && return 1; }
     return 0
 }
 
@@ -576,12 +578,19 @@ main() {
     fi
     archive_old
     prune_empty
-    # promote the undo record only if something actually moved this run
+    # append this run's moves to the undo history (stack), stamped with the run
     if [ "$MOVE_COUNT" -gt 0 ] || [ "$ARCHIVE_COUNT" -gt 0 ]; then
-        mv -f "$UNDO_PARTIAL" "$UNDO_FILE" 2>/dev/null
-    else
-        rm -f "$UNDO_PARTIAL" 2>/dev/null
+        local _stamp _h
+        _stamp=$(date +%s)
+        while IFS= read -r _h || [ -n "$_h" ]; do
+            [ -n "$_h" ] && printf '%s\t%s\n' "$_stamp" "$_h" >> "$HISTORY_FILE"
+        done < "$UNDO_PARTIAL"
+        # keep the history bounded (~last 2000 moves)
+        if [ "$(wc -l < "$HISTORY_FILE" 2>/dev/null || echo 0)" -gt 3000 ]; then
+            tail -n 2000 "$HISTORY_FILE" > "$HISTORY_FILE.tmp" 2>/dev/null && mv "$HISTORY_FILE.tmp" "$HISTORY_FILE"
+        fi
     fi
+    rm -f "$UNDO_PARTIAL" 2>/dev/null
     notify
     aging_notice
 }
