@@ -513,9 +513,9 @@ notify() {
     # per-category rollup, e.g. "3 → Documents/PDFs, 2 → Media/Images"
     local rollup body
     rollup=$(printf '%s' "$SUMMARY" | sed '/^$/d' | sort | uniq -c | sort -rn | \
-        awk '{ n=$1; $1=""; sub(/^[ \t]+/,""); printf "%s%d → %s", (NR>1?", ":""), n, $0 }')
+        awk '{ n=$1; $1=""; sub(/^[ \t]+/,""); printf "%s%d -> %s", (NR>1?", ":""), n, $0 }')
     if [ "$MOVE_COUNT" -gt 0 ] && [ "$ARCHIVE_COUNT" -gt 0 ]; then
-        body="$rollup · archived $ARCHIVE_COUNT old"
+        body="$rollup - archived $ARCHIVE_COUNT old"
     elif [ "$MOVE_COUNT" -gt 0 ]; then
         body="$rollup"
     else
@@ -601,7 +601,7 @@ aging_notice() {
     [ "${old:-0}" -gt 0 ] || return
     touch "$AGING_STAMP"                                   # mark the week regardless of mute
     [ -e "$NONOTIFY_FLAG" ] && return
-    DSORT_BODY="$old file(s) in Archive over a year old — review?" DSORT_TITLE="Downloads sorter" "$NOTIFIER" >/dev/null 2>>"$LOG"
+    DSORT_BODY="$old file(s) in Archive over a year old - review?" DSORT_TITLE="Downloads sorter" "$NOTIFIER" >/dev/null 2>>"$LOG"
 }
 
 # digest_notice — opt-in weekly summary of what was sorted, from the log. At most
@@ -628,12 +628,12 @@ digest_notice() {
           | sort | uniq -c | sort -rn | head -2 \
           | awk '{ c=$1; $1=""; sub(/^ +/,""); printf "%s (%d), ", $0, c }' | sed 's/, $//')
     body="This week: sorted $moves file(s)"
-    [ "${arch:-0}" -gt 0 ] && body="$body · archived $arch"
-    [ -n "$top" ] && body="$body · top: $top"
+    [ "${arch:-0}" -gt 0 ] && body="$body - archived $arch"
+    [ -n "$top" ] && body="$body - top: $top"
     touch "$DIGEST_STAMP"                                  # mark the week regardless of mute
     log "weekly digest: $body"
     [ -e "$NONOTIFY_FLAG" ] && return
-    DSORT_BODY="$body" DSORT_TITLE="Downloads — weekly digest" "$NOTIFIER" >/dev/null 2>>"$LOG"
+    DSORT_BODY="$body" DSORT_TITLE="Downloads - weekly digest" "$NOTIFIER" >/dev/null 2>>"$LOG"
 }
 
 # category_map — "Category|what routes there" for the Help "Folder categories"
