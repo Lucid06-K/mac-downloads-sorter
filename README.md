@@ -147,7 +147,7 @@ dsort on|off          # enable/disable the whole sorter
 
 ### Custom rules
 
-Create `~/.downloads-rules.conf` to override the built‑in categories:
+Add and manage these right in the menu — **Settings → Custom sorting rules** (type a pattern, pick the destination folder; no file editing). They're stored in `~/.downloads-rules.conf` if you'd rather edit by hand:
 
 ```
 # pattern              destination

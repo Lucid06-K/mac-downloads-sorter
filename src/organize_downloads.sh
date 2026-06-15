@@ -536,6 +536,35 @@ aging_notice() {
     "$NOTIFIER" "$old file(s) in Archive over a year old — review?" "Downloads sorter" >/dev/null 2>>"$LOG"
 }
 
+# category_map — "Category|what routes there" for the Help "Folder categories"
+# view. Display only; KEEP IN SYNC WITH classify() above.
+category_map() {
+    cat <<'EOF'
+Screenshots|names starting with: screenshot, "screen shot", "screen recording", SCR-
+Media/Images|png jpg jpeg gif heic heif webp svg tif tiff bmp avif ico
+Media/Audio|mp3 wav m4a m4b flac aac ogg opus aiff aif
+Media/Video|mp4 mov mkv avi m4v webm mpg mpeg wmv flv srt vtt
+Documents/PDFs|pdf
+Documents/Slides|ppt pptx pps ppsx key odp
+Documents/Spreadsheets|xls xlsx xlsm csv tsv numbers ods
+Documents/Word & Text|doc docx txt md markdown rtf rtfd pages odt tex bib wpd
+Documents/eBooks|epub mobi azw azw3 fb2 djvu
+Documents/Web|html htm webarchive mht mhtml webloc url
+Compressed Files|zip tar gz tgz bz2 tbz 7z rar xz zst lz lzma cab z
+Disk Images|dmg iso img toast cdr vcd
+Installers & Apps|pkg mpkg app xip msi exe deb rpm appimage apk
+Code & Scripts|py ipynb sh zsh bash js mjs cjs ts tsx jsx json jsonl yaml yml toml xml sql css scss sass less c cc cpp h hpp java rb go rs php swift kt kts scpt applescript plist ini cfg conf env lua pl
+Design|psd ai sketch fig xd eps indd afdesign afphoto afpub
+Fonts|ttf otf ttc woff woff2 fon pfb pfm
+3D & CAD|stl obj fbx blend 3ds dae dwg dxf step stp igs iges gltf glb ply usdz 3mf
+Torrents|torrent
+Data|sqlite sqlite3 db accdb mdb dat parquet avro
+Calendars & Contacts|ics ical vcf vcard
+Invoices & Receipts|names containing: invoice, receipt, statement, billing, bill_, bill-
+Misc|anything not matched above
+EOF
+}
+
 main() {
     : > "$UNDO_PARTIAL" 2>/dev/null              # fresh undo record for this run
     scan
