@@ -81,7 +81,7 @@ It has two screens — a compact **main menu** and a **Settings** submenu:
  ─────────────────                     Filename cleanup   ○ OFF
   Sort now                             Auto-run interval  every 1h
   Preview (dry run)                    Archive age        30 days
-  Undo last run                        Aging nudge        ● ON
+  Undo                                 Aging nudge        ● ON
   Stats                                Duplicate routing  ● ON
   Activity log                         Big files          ≥ 5 GB
  ─────────────────                     Screenshot dating  ● ON
