@@ -24,6 +24,7 @@ NONOTIFY_FLAG="$HOME/Library/Scripts/organize_downloads.nonotify"
 CLEANFLAG="$HOME/Library/Scripts/organize_downloads.cleannames"
 AGEFILE="$HOME/Library/Scripts/organize_downloads.archivedays"
 GRACEFILE="$HOME/Library/Scripts/organize_downloads.graceperiod"
+RECENTFILE="$HOME/Library/Scripts/organize_downloads.recentcount"
 AGING_FLAG="$HOME/Library/Scripts/organize_downloads.noaging"
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
 LFFILE="$HOME/Library/Scripts/organize_downloads.largefilegb"
@@ -38,13 +39,14 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.9"
+VERSION="1.0.10"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
 RECOMMENDED_ARCHIVE_DAYS=30     # sweep files older than this into Archive/
 RECOMMENDED_LARGEFILE_GB=5      # files >= this go to Large Files/ for review
 RECOMMENDED_GRACE=60            # seconds to let a download settle before sorting
+RECOMMENDED_RECENT=3            # lines of recent activity shown under the main menu
 
 R=$'\033[0m'; REV=$'\033[7m'; DIM=$'\033[2m'; GRN=$'\033[32m'; BLD=$'\033[1m'; YEL=$'\033[33m'
 
@@ -122,6 +124,20 @@ set_grace() {
     case "$s" in ""|*[!0-9]*) return 1 ;; esac
     [ "$s" -gt 86400 ] && return 1
     printf '%s\n' "$s" > "$GRACEFILE"
+}
+
+# how many recent moves to list under the main menu; stored in RECENTFILE,
+# default RECOMMENDED_RECENT, 0 = hide the list, capped at 10 (menu height).
+get_recent_count() {
+    local v=""
+    [ -r "$RECENTFILE" ] && v=$(tr -dc '0-9' < "$RECENTFILE" 2>/dev/null)
+    [ -n "$v" ] && echo "$v" || echo "$RECOMMENDED_RECENT"
+}
+set_recent_count() {
+    local n="$1"
+    case "$n" in ""|*[!0-9]*) return 1 ;; esac
+    [ "$n" -gt 10 ] && return 1
+    printf '%s\n' "$n" > "$RECENTFILE"
 }
 # friendly seconds label: "0s (immediate)", "45s", "2m", "1m 30s"
 fmt_grace() {
@@ -440,17 +456,33 @@ show_status() {
     echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — recommended every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
     echo "Archive age: $ad days — recommended $RECOMMENDED_ARCHIVE_DAYS"
     echo "Grace period: $(fmt_grace "$(get_grace)") — recommended ${RECOMMENDED_GRACE}s"
-    echo "Recent activity:"
+    echo "Recent list (menu): $(get_recent_count) line(s)"
+    echo "Last activity:"
     tail -n 5 "$LOG" 2>/dev/null || echo "  (no log yet)"
 }
 
 # ---------- interactive UI ----------
 
-# compact "HH:MM  file → Dest" lines for the activity panel
+# compact, colour-matched "recent activity" for the main menu — the same line
+# style as the full Activity log (dim time · name → green dest), newest first,
+# limited to the configured count (Settings → Recent activity; 0 hides it).
 recent_lines() {
-    tail -n 3 "$LOG" 2>/dev/null |
-        sed -E -e 's/^[0-9-]+ ([0-9]{2}:[0-9]{2}):[0-9]{2} moved: /\1  /' \
-               -e 's| -> (.*)/$| → \1|' | cut -c 1-60
+    local n; n=$(get_recent_count)
+    [ "${n:-0}" -gt 0 ] || return 0
+    [ -s "$LOG" ] || return 0
+    grep -E ' (moved|archived|duplicate): ' "$LOG" 2>/dev/null | tail -n "$n" | tail -r | awk \
+        -v dim="$DIM" -v grn="$GRN" -v r="$R" '
+    {
+        t = substr($0, 12, 5)
+        rest = substr($0, 21)                       # "verb: payload"
+        ci = index(rest, ": "); verb = substr(rest, 1, ci-1); payload = substr(rest, ci+2)
+        m = split(payload, p, " -> ")
+        dest = p[m]; sub(/\/$/, "", dest)
+        name = p[1]; for (i = 2; i < m; i++) name = name " -> " p[i]
+        if (length(name) > 34) name = substr(name, 1, 33) "…"
+        tag = (verb == "archived") ? "  " dim "(archived)" r : (verb == "duplicate") ? "  " dim "(dup)" r : ""
+        printf "   %s%s%s  %-34s %s→ %s%s%s\n", dim, t, r, name, grn, dest, r, tag
+    }'
 }
 
 # the number-shortcut for a row: 1-9 for rows 0-8, 0 for row 9, blank beyond
@@ -495,19 +527,21 @@ describe_settings() {
         9)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
         10) echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
         11) echo "Opt-in: check GitHub daily on open and install verified updates automatically." ;;
-        12) echo "See where every file type is filed (and your custom rules) — read-only." ;;
-        13) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
-        14) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
-        15) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
-        16) echo "Return to the main menu." ;;
+        12) echo "How many recent moves to list under the main menu (0 hides the list)." ;;
+        13) echo "See where every file type is filed (and your custom rules) — read-only." ;;
+        14) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
+        15) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
+        16) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
+        17) echo "Return to the main menu." ;;
     esac
 }
 
 draw() {
-    local s_plain s_col n_plain n_col c_plain c_col i_plain i_col a_plain a_col gp_plain gp_col recent
-    local iv ivf ad gp gpf
+    local s_plain s_col n_plain n_col c_plain c_col i_plain i_col a_plain a_col gp_plain gp_col rc_plain rc_col recent
+    local iv ivf ad gp gpf rc
     iv=$(get_interval); ivf=$(fmt_interval "${iv:-0}"); ad=$(get_archivedays)
     gp=$(get_grace); gpf=$(fmt_grace "$gp")
+    rc=$(get_recent_count)
 
     if is_loaded; then
         s_plain="Sorter             ● ON";  s_col="Sorter             ${GRN}● ON${R}"
@@ -541,6 +575,16 @@ draw() {
         gp_col="Grace period       ${GRN}$gpf${R} ${DIM}(recommended)${R}"
     else
         gp_col="Grace period       ${YEL}$gpf${R} ${DIM}(rec ${RECOMMENDED_GRACE}s)${R}"
+    fi
+    if [ "$rc" = 0 ]; then
+        rc_plain="Recent activity    hidden"
+        rc_col="Recent activity    ${DIM}hidden${R} ${DIM}(rec $RECOMMENDED_RECENT)${R}"
+    elif [ "$rc" = "$RECOMMENDED_RECENT" ]; then
+        rc_plain="Recent activity    $rc lines"
+        rc_col="Recent activity    ${GRN}$rc lines${R} ${DIM}(recommended)${R}"
+    else
+        rc_plain="Recent activity    $rc lines"
+        rc_col="Recent activity    ${YEL}$rc lines${R} ${DIM}(rec $RECOMMENDED_RECENT)${R}"
     fi
     local g_plain g_col d_plain d_col lf lf_plain lf_col ss_plain ss_col mt_plain mt_col au_plain au_col uu_plain uu_col
     if aging_is_on; then
@@ -602,13 +646,14 @@ draw() {
         row 9 "$mt_plain" "$mt_col"
         row 10 "$au_plain" "$au_col"
         row 11 "$uu_plain" "$uu_col"
+        row 12 "$rc_plain" "$rc_col"
         printf '  %s\n' "$SEP"
-        row 12 "Folder categories ▸"   "Folder categories ▸"
-        row 13 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
-        row 14 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
-        row 15 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
+        row 13 "Folder categories ▸"   "Folder categories ▸"
+        row 14 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
+        row 15 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
+        row 16 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
         printf '  %s\n' "$SEP"
-        row 16 "← Back to menu" "← Back to menu"
+        row 17 "← Back to menu" "← Back to menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -631,12 +676,11 @@ draw() {
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_main "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
-        printf '  %s\n' "${DIM}Recent activity${R}"
-        recent=$(recent_lines)
-        if [ -n "$recent" ]; then
-            printf '%s\n' "$recent" | while IFS= read -r l; do printf '   %s%s%s\n' "$DIM" "$l" "$R"; done
-        else
-            printf '   %s(none yet)%s\n' "$DIM" "$R"
+        if [ "$(get_recent_count)" -gt 0 ] 2>/dev/null; then
+            printf '  %s\n' "${DIM}Recent activity${R}"
+            recent=$(recent_lines)
+            if [ -n "$recent" ]; then printf '%s\n' "$recent"
+            else printf '   %s(none yet)%s\n' "$DIM" "$R"; fi
         fi
         printf '\n  %s\n' "${DIM}↑/↓ move · enter or 1-9 · q quit${R}"
     fi
@@ -787,6 +831,24 @@ prompt_grace() {
         r|R)       set_grace "$RECOMMENDED_GRACE" && MSG="Grace period → $(fmt_grace "$RECOMMENDED_GRACE")" ;;
         *[!0-9]*)  MSG="Invalid — digits only (seconds)" ;;
         *)         if set_grace "$input"; then MSG="Grace period → $(fmt_grace "$input")"; else MSG="Unchanged (0–86400 seconds)"; fi ;;
+    esac
+}
+
+prompt_recent() {
+    local cur input
+    cur=$(get_recent_count)
+    printf '\033[?25h'
+    printf '\n  %sRecent activity on the menu%s\n' "$BLD" "$R"
+    printf '  How many recent moves to list under the main menu.\n'
+    printf '  Current: %s   %sRecommended: %s · 0 hides the list%s\n' "$cur" "$DIM" "$RECOMMENDED_RECENT" "$R"
+    printf '  A number 0–10, %sr%s = recommended, blank = keep: ' "$BLD" "$R"
+    IFS= read -r input
+    printf '\033[?25l'
+    case "$input" in
+        "")        MSG="Recent activity unchanged ($cur)" ;;
+        r|R)       set_recent_count "$RECOMMENDED_RECENT" && MSG="Recent activity → $RECOMMENDED_RECENT lines" ;;
+        *[!0-9]*)  MSG="Invalid — digits only" ;;
+        *)         if set_recent_count "$input"; then [ "$input" = 0 ] && MSG="Recent activity list hidden" || MSG="Recent activity → $input line(s)"; else MSG="Unchanged (0–10)"; fi ;;
     esac
 }
 
@@ -1112,7 +1174,7 @@ EOF
 
        dsort interval [secs|r]      archivedays [days|r]
        dsort graceperiod [secs|r]   largefiles [GB|r]
-       dsort exclude / only  [items|clear]
+       dsort recentcount [0-10|r]   exclude / only  [items|clear]
 
        dsort on | off           enable/disable the whole sorter
 EOF
@@ -1327,11 +1389,12 @@ activate() {
             9)  toggle_metanames ;;
             10) toggle_autounzip ;;
             11) toggle_autoupdate ;;
-            12) do_categories ;;
-            13) do_filter exclude ;;
-            14) do_filter only ;;
-            15) do_rules ;;
-            16) SCREEN=main; focus=6 ;;
+            12) prompt_recent ;;
+            13) do_categories ;;
+            14) do_filter exclude ;;
+            15) do_filter only ;;
+            16) do_rules ;;
+            17) SCREEN=main; focus=6 ;;
         esac
     else
         case "$focus" in
@@ -1357,7 +1420,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=17 || NROWS=10
+        [ "$SCREEN" = settings ] && NROWS=18 || NROWS=10
         draw
         MSG=""
         key=$(read_key) || break
@@ -1479,6 +1542,15 @@ case "$1" in
             esac
         else
             echo "Grace period: $(fmt_grace "$(get_grace)") (recommended ${RECOMMENDED_GRACE}s)"
+        fi ;;
+    recentcount|recent)
+        if [ -n "$2" ]; then
+            case "$2" in
+                r|recommended) set_recent_count "$RECOMMENDED_RECENT" && echo "Recent activity: $RECOMMENDED_RECENT lines on the menu" ;;
+                *) if set_recent_count "$2"; then [ "$2" = 0 ] && echo "Recent activity list: hidden" || echo "Recent activity: $2 line(s) on the menu"; else echo "Invalid (whole number 0–10)." >&2; exit 1; fi ;;
+            esac
+        else
+            echo "Recent activity: $(get_recent_count) line(s) on the menu (recommended $RECOMMENDED_RECENT)"
         fi ;;
     preview)
         run_preview ;;

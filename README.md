@@ -121,6 +121,7 @@ dsort interval [seconds|r]
 dsort graceperiod [seconds|r]   # how long a download settles before sorting (0 = immediate)
 dsort archivedays [days|r]
 dsort largefiles [GB|r]     # 0 = off
+dsort recentcount [0-10|r]  # recent moves listed under the main menu (0 = hide)
 
 dsort on|off          # enable/disable the whole sorter
 ```
