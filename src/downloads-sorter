@@ -39,7 +39,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.11"
+VERSION="1.0.12"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -293,15 +293,19 @@ run_rules() (
     rf="$HOME/.downloads-rules.conf"
     if [ ! -r "$rf" ]; then
         echo "No custom rules yet. Create $rf with lines like:"
-        echo "    *statement*   -> Documents/Finance"
-        echo "    *.dwg         -> 3D & CAD"
+        echo "    *statement*           -> Documents/Finance"
+        echo "    *.dwg                 -> 3D & CAD"
+        echo "    source:*github.com*   -> Installers & Apps   (match the download's origin)"
         echo "(arrow may be -> or →; rules are checked before the built-in categories)"
         exit 0
     fi
     source "$SORTER" >/dev/null 2>&1
     if [ "${#RULE_PAT[@]}" -eq 0 ]; then echo "Rules file present but no valid rules parsed."; exit 0; fi
     echo "Custom rules (checked before built-ins):"
-    for i in "${!RULE_PAT[@]}"; do printf '   %-28s → %s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}"; done
+    for i in "${!RULE_PAT[@]}"; do
+        if [ "${RULE_KIND[$i]:-name}" = source ]; then printf '   %-28s → %s   %s(download source)%s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}" "$DIM" "$R"
+        else printf '   %-28s → %s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}"; fi
+    done
 )
 
 # `dsort find <text>`: where did a download go? Case-insensitive substring search
@@ -350,7 +354,10 @@ render_categories() (
     done
     if [ "${#RULE_PAT[@]}" -gt 0 ]; then
         printf '\n  %sYour custom rules%s   %s(checked first — override the above)%s\n\n' "$BLD" "$R" "$DIM" "$R"
-        for i in "${!RULE_PAT[@]}"; do printf '  %s%-*s%s →  %s\n' "$GRN" "$left" "${RULE_PAT[$i]}" "$R" "${RULE_DEST[$i]}"; done
+        for i in "${!RULE_PAT[@]}"; do
+            if [ "${RULE_KIND[$i]:-name}" = source ]; then printf '  %ssource:%-*s%s →  %s\n' "$GRN" "$((left-7))" "${RULE_PAT[$i]}" "$R" "${RULE_DEST[$i]}"
+            else printf '  %s%-*s%s →  %s\n' "$GRN" "$left" "${RULE_PAT[$i]}" "$R" "${RULE_DEST[$i]}"; fi
+        done
     else
         printf '\n  %sNo custom rules yet — add some in Settings → Custom sorting rules.%s\n' "$DIM" "$R"
     fi
@@ -1116,18 +1123,28 @@ EOF
     4) cat <<'EOF'
   CUSTOM SORTING RULES
 
-  Send files matching a pattern to a folder of your choice — these override
-  the built-in categories. Add and manage them, no typing in a file, from:
+  Send matching files to a folder of your choice — these override the
+  built-in categories. When you add a rule you first choose what to match:
+  the FILENAME, or the WEBSITE the file was downloaded from. Add and manage
+  them, no typing in a file, from:
 
        Settings ▸   →   Custom sorting rules ▸
 
-  Examples:
+  By filename:
 
-       *statement*    →   Documents/Finance
+       *statement*           →   Documents/Finance
 
-       *.dwg          →   3D & CAD
+       *.dwg                 →   3D & CAD
 
-       *figma*        →   Design
+  By download source (prefix the pattern with  source: ):
+
+       source:*github.com*   →   Installers & Apps
+
+       source:*unimelb.edu.au*  →  Course
+
+  macOS tags each download with where it came from, so source rules let you
+  file everything from a given site together — regardless of its name.
+  Files made locally (no origin) just fall through to the normal rules.
 
   (They live in ~/.downloads-rules.conf if you'd rather edit by hand;
    list them anytime with  dsort rules.)
@@ -1317,20 +1334,61 @@ _rules_delete() {
     mv "$rf.tmp" "$rf"
 }
 
-# add a rule: prompt for a pattern, then pick the destination folder
-_rules_add() {
-    local rf="$1" pat dest cats focus=0 n i key
-    printf '\033[?25h'
-    printf '\n  %sNew rule%s\n' "$BLD" "$R"
-    printf '  Filename pattern (e.g. *statement*  or  *.dwg): '
-    IFS= read -r pat; printf '\033[?25l'
-    pat=$(printf '%s' "$pat" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    [ -z "$pat" ] && return
-    cats=( "${FILTER_CATS[@]}" "Documents/PDFs" "Documents/Word & Text" "Media/Images" "Media/Video" "Type a custom folder…" )
-    n=${#cats[@]}
+# choose whether a new rule matches the filename or the download source.
+# Sets RULE_BY=name|source; returns 1 if cancelled.
+_rules_pick_by() {
+    local f=0 k i
+    local opts=("Filename — match the file's name" "Download source — match the website it came from")
     while :; do
         printf '\033[H\033[2J'
-        printf '\n  %sSend "%s" to which folder?%s\n' "$BLD" "$pat" "$R"
+        printf '\n  %sNew rule — match by?%s\n\n' "$BLD" "$R"
+        for i in 0 1; do
+            if [ "$i" -eq "$f" ]; then printf '   %s ▸ %s%s\n' "$REV" "${opts[$i]}" "$R"
+            else printf '     %s\n' "${opts[$i]}"; fi
+        done
+        printf '\n  %s↑/↓ move · enter choose · esc cancel%s\n' "$DIM" "$R"
+        k=$(read_key)
+        case "$k" in
+            up|k|down|j) f=$((1-f)) ;;
+            esc|q)       return 1 ;;
+            "")          [ "$f" -eq 1 ] && RULE_BY=source || RULE_BY=name; return 0 ;;
+        esac
+    done
+}
+
+# add a rule: choose match-by, enter the pattern, then pick the destination folder
+_rules_add() {
+    local rf="$1" pat dest cats focus=0 n i key raw RULE_BY=name
+    printf '\033[?25l'
+    _rules_pick_by || return
+    printf '\033[?25h'
+    if [ "$RULE_BY" = source ]; then
+        printf '\033[H\033[2J'
+        printf '\n  %sNew rule — by download source%s\n' "$BLD" "$R"
+        printf '  %sFiles are tagged by macOS with the website they came from.%s\n' "$DIM" "$R"
+        printf '  Match downloads from (e.g. github.com, unimelb.edu.au): '
+        IFS= read -r raw; printf '\033[?25l'
+        raw=$(printf '%s' "$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+        [ -z "$raw" ] && return
+        case "$raw" in *'*'*) pat="source:$raw" ;; *) pat="source:*$raw*" ;; esac
+    else
+        printf '\033[H\033[2J'
+        printf '\n  %sNew rule — by filename%s\n' "$BLD" "$R"
+        printf '  Filename pattern (e.g. *statement*  or  *.dwg): '
+        IFS= read -r pat; printf '\033[?25l'
+        pat=$(printf '%s' "$pat" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -z "$pat" ] && return
+    fi
+    cats=( "${FILTER_CATS[@]}" "Documents/PDFs" "Documents/Word & Text" "Media/Images" "Media/Video" "Type a custom folder…" )
+    n=${#cats[@]}
+    local patlabel
+    case "$pat" in
+        source:*) patlabel="files from ${pat#source:}"; patlabel="${patlabel//\*/}" ;;
+        *)        patlabel="\"$pat\"" ;;
+    esac
+    while :; do
+        printf '\033[H\033[2J'
+        printf '\n  %sSend %s to which folder?%s\n' "$BLD" "$patlabel" "$R"
         printf '  %s\n' "${DIM}──────────────────────────────────────────────${R}"
         for i in "${!cats[@]}"; do
             if [ "$i" -eq "$focus" ]; then printf '  %s ▸ %-40s%s\n' "$REV" "${cats[$i]}" "$R"
@@ -1355,7 +1413,7 @@ _rules_add() {
 
 # interactive custom-rules editor (no config-file editing needed)
 do_rules() {
-    local rf="$HOME/.downloads-rules.conf" pats dests line p d focus=0 key i n nrows
+    local rf="$HOME/.downloads-rules.conf" pats dests line p d focus=0 key i n nrows pdisp tag
     printf '\033[?25l'
     while :; do
         pats=(); dests=()
@@ -1374,8 +1432,10 @@ do_rules() {
         printf '  %s\n' "${DIM}──────────────────────────────────────────────${R}"
         [ "$n" -eq 0 ] && printf '     %s(none yet — add one below)%s\n' "$DIM" "$R"
         for i in "${!pats[@]}"; do
-            if [ "$i" -eq "$focus" ]; then printf '  %s ▸ %-22s → %-20s%s  enter = delete\n' "$REV" "${pats[$i]}" "${dests[$i]}" "$R"
-            else printf '     %-22s → %s\n' "${pats[$i]}" "${dests[$i]}"; fi
+            pdisp="${pats[$i]}"; tag=""
+            case "${pats[$i]}" in source:*) pdisp="from ${pats[$i]#source:}"; pdisp="${pdisp//\*/}"; tag=" ${DIM}· source${R}" ;; esac
+            if [ "$i" -eq "$focus" ]; then printf '  %s ▸ %-22s → %-18s%s%s  enter=del\n' "$REV" "$pdisp" "${dests[$i]}" "$R" "$tag"
+            else printf '     %-22s → %s%s\n' "$pdisp" "${dests[$i]}" "$tag"; fi
         done
         printf '  %s\n' "${DIM}──────────────────────────────────────────────${R}"
         if [ "$focus" -eq "$n" ]; then printf '  %s ▸ + Add a rule%s\n' "$REV" "$R"; else printf '     + Add a rule\n'; fi

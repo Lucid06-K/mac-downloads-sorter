@@ -150,16 +150,20 @@ dsort on|off          # enable/disable the whole sorter
 
 ### Custom rules
 
-Add and manage these right in the menu — **Settings → Custom sorting rules** (type a pattern, pick the destination folder; no file editing). They're stored in `~/.downloads-rules.conf` if you'd rather edit by hand:
+Add and manage these right in the menu — **Settings → Custom sorting rules**. When you add a rule you first choose **what to match on — the filename, or the website the file was downloaded from** — then pick the destination folder (no file editing). They're stored in `~/.downloads-rules.conf` if you'd rather edit by hand:
 
 ```
-# pattern              destination
-*statement*         -> Documents/Finance
-*.dwg               -> 3D & CAD
-*figma*             -> Design
+# pattern                  destination
+*statement*             -> Documents/Finance
+*.dwg                   -> 3D & CAD
+*figma*                 -> Design
+source:*github.com*     -> Installers & Apps
+source:*unimelb.edu.au* -> Course
 ```
 
-The arrow may be `->` or `→`; `#` lines are comments. Rules are checked **before** the built‑in categories. List them with `dsort rules`.
+A normal pattern matches the **filename**. Prefix a pattern with **`source:`** to match the **download origin** instead — macOS tags each download with where it came from (`kMDItemWhereFroms`), so `source:*github.com*` files everything you got from GitHub, `source:*unimelb.edu.au*` everything from your university, and so on. The arrow may be `->` or `→`; `#` lines are comments. Rules are checked **before** the built‑in categories, in file order. List them with `dsort rules`.
+
+> Source rules need the file's origin metadata, which browsers attach automatically. Files created locally (no download origin) simply fall through to the normal filename/extension rules.
 
 ### Limit what gets sorted
 

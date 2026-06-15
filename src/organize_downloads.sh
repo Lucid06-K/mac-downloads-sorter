@@ -87,7 +87,10 @@ AUTOUNZIP_FLAG="$HOME/Library/Scripts/organize_downloads.autounzip"
 # (arrow may be -> or →; # comments and blanks ignored). Loaded once; checked
 # before the built-in rules so a user rule can override any category.
 RULES_FILE="$HOME/.downloads-rules.conf"
-RULE_PAT=(); RULE_DEST=()
+# A rule's pattern matches the lowercased filename by default; prefix it with
+# "source:" to match the URL the file was downloaded from instead (e.g.
+# "source:*github.com* -> Installers & Apps"). RULE_KIND[i] is name|source.
+RULE_PAT=(); RULE_DEST=(); RULE_KIND=()
 if [ -r "$RULES_FILE" ]; then
     while IFS= read -r _rl || [ -n "$_rl" ]; do
         case "$_rl" in ''|'#'*) continue ;; esac
@@ -95,7 +98,9 @@ if [ -r "$RULES_FILE" ]; then
         case "$_rl" in *'->'*) ;; *) continue ;; esac
         _pat=$(printf '%s' "${_rl%%->*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
         _dst=$(printf '%s' "${_rl#*->}"  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        [ -n "$_pat" ] && [ -n "$_dst" ] && { RULE_PAT+=("$_pat"); RULE_DEST+=("$_dst"); }
+        _kind=name
+        case "$_pat" in source:*) _kind=source; _pat=$(printf '%s' "${_pat#source:}" | sed 's/^[[:space:]]*//') ;; esac
+        [ -n "$_pat" ] && [ -n "$_dst" ] && { RULE_PAT+=("$_pat"); RULE_DEST+=("$_dst"); RULE_KIND+=("$_kind"); }
     done < "$RULES_FILE"
 fi
 
@@ -155,17 +160,36 @@ ARCHIVE_COUNT=0
 MOVES=""
 SUMMARY=""           # newline-separated destination categories, for the grouped notification
 
-# classify <basename> -> echoes the relative category path (may be nested, e.g.
-# "Documents/PDFs"). Filename-keyword rules win over extension rules; first match
-# wins. Extensions are matched case-insensitively.
+# the URL(s) a file was downloaded from (Spotlight kMDItemWhereFroms), flattened
+# to one lowercased line for glob matching. Empty when the file has no origin.
+where_from() {
+    local w
+    w=$(mdls -name kMDItemWhereFroms -raw "$1" 2>/dev/null | tr '\n' ' ' | tr -s ' ' | sed 's/ *$//' | tr '[:upper:]' '[:lower:]')
+    [ "$w" = "(null)" ] && w=""
+    printf '%s' "$w"
+}
+
+# classify <basename> [filepath] -> echoes the relative category path (may be
+# nested, e.g. "Documents/PDFs"). User rules win over keyword rules over
+# extension rules; first match wins. A "source" rule needs the filepath to read
+# the download origin; without it, source rules are skipped. Case-insensitive.
 classify() {
-    local base="$1" lower ext i
+    local base="$1" file="${2:-}" lower ext i wf="" wf_done=0
     lower=$(echo "$base" | tr '[:upper:]' '[:lower:]')
     ext="${lower##*.}"
 
-    # --- user-defined rules win (matched against the lowercased filename) ---
+    # --- user-defined rules win, in file order ---
+    # name rules match the lowercased filename; source rules match the download
+    # URL (kMDItemWhereFroms), looked up lazily and only if a source rule exists.
     for i in "${!RULE_PAT[@]}"; do
-        case "$lower" in ${RULE_PAT[$i]}) echo "${RULE_DEST[$i]}"; return ;; esac
+        if [ "${RULE_KIND[$i]:-name}" = source ]; then
+            [ -n "$file" ] || continue
+            if [ "$wf_done" = 0 ]; then wf=$(where_from "$file"); wf_done=1; fi
+            [ -n "$wf" ] || continue
+            case "$wf" in ${RULE_PAT[$i]}) echo "${RULE_DEST[$i]}"; return ;; esac
+        else
+            case "$lower" in ${RULE_PAT[$i]}) echo "${RULE_DEST[$i]}"; return ;; esac
+        fi
     done
 
     # --- filename-keyword rules (checked before extension) ---
@@ -414,7 +438,7 @@ scan() {
             continue
         fi
 
-        rel=$(classify "$base")
+        rel=$(classify "$base" "$f")
         # respect the user's exclude / only-sort filter — leave out-of-scope files put
         in_scope "$ext" "$rel" || continue
 
@@ -505,7 +529,7 @@ preview() {
         case "$base" in '~$'*) continue ;; esac
         ext=$(echo "${base##*.}" | tr '[:upper:]' '[:lower:]')
         case "$ext" in crdownload|download|part|partial|tmp|opdownload|aria2|'!ut') continue ;; esac
-        rel=$(classify "$base")
+        rel=$(classify "$base" "$f")
         if ! in_scope "$ext" "$rel"; then
             printf '%s\n    → (skipped — excluded by your filter)\n' "$base"
             count=$((count+1)); continue
