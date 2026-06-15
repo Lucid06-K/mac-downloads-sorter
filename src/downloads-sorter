@@ -39,7 +39,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.10"
+VERSION="1.0.11"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -122,7 +122,7 @@ get_grace() {
 set_grace() {
     local s="$1"
     case "$s" in ""|*[!0-9]*) return 1 ;; esac
-    [ "$s" -gt 86400 ] && return 1
+    [ "$s" -gt 604800 ] && return 1          # max 7 days
     printf '%s\n' "$s" > "$GRACEFILE"
 }
 
@@ -142,10 +142,16 @@ set_recent_count() {
 # friendly seconds label: "0s (immediate)", "45s", "2m", "1m 30s"
 fmt_grace() {
     local s="$1"
-    [ "$s" -eq 0 ] 2>/dev/null && { echo "0s (immediate)"; return; }
+    case "$s" in ''|*[!0-9]*) echo "$s"; return ;; esac
+    [ "$s" -eq 0 ] && { echo "0s (immediate)"; return; }
     if [ "$s" -lt 120 ]; then echo "${s}s"
-    elif [ $((s % 60)) -eq 0 ]; then echo "$((s/60))m"
-    else echo "$((s/60))m $((s%60))s"; fi
+    elif [ "$s" -lt 3600 ]; then
+        if [ $((s % 60)) -eq 0 ]; then echo "$((s/60))m"; else echo "$((s/60))m $((s%60))s"; fi
+    elif [ "$s" -lt 86400 ]; then
+        if [ $((s % 3600)) -eq 0 ]; then echo "$((s/3600))h"; else echo "$((s/3600))h $(((s%3600)/60))m"; fi
+    else
+        if [ $((s % 86400)) -eq 0 ]; then echo "$((s/86400))d"; else echo "$((s/86400))d $(((s%86400)/3600))h"; fi
+    fi
 }
 
 # --- undo history (a stack of moves) ------------------------------------
@@ -441,7 +447,7 @@ show_status() {
     aging_is_on  && echo "Aging nudge (weekly, Archive >1yr): ON" || echo "Aging nudge: OFF"
     dedup_is_on  && echo "Duplicate routing: ON (identical → Duplicates/)" || echo "Duplicate routing: OFF"
     if [ "$(get_largefile)" = 0 ]; then echo "Big-file quarantine: OFF"
-    else echo "Big-file quarantine: ≥ $(get_largefile) GB → Large Files/ (recommended $RECOMMENDED_LARGEFILE_GB)"; fi
+    else echo "Big-file quarantine: ≥ $(get_largefile) GB → Large Files/ (default $RECOMMENDED_LARGEFILE_GB)"; fi
     ss_is_on    && echo "Screenshot dating: ON (date-prefix + monthly folders)" || echo "Screenshot dating: OFF"
     meta_is_on  && echo "Metadata naming (PDF titles): ON" || echo "Metadata naming: OFF (opt-in)"
     unzip_is_on && echo "Auto-unzip (.zip): ON" || echo "Auto-unzip: OFF (opt-in)"
@@ -453,9 +459,9 @@ show_status() {
     if [ "$on" -gt 0 ]; then echo "Sorting filter: ONLY sorting $on selected type(s) (+ $ex excluded)"
     elif [ "$ex" -gt 0 ]; then echo "Sorting filter: excluding $ex type(s)"
     else echo "Sorting filter: off (sorting everything)"; fi
-    echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — recommended every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
-    echo "Archive age: $ad days — recommended $RECOMMENDED_ARCHIVE_DAYS"
-    echo "Grace period: $(fmt_grace "$(get_grace)") — recommended ${RECOMMENDED_GRACE}s"
+    echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — default every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
+    echo "Archive age: $ad days — default $RECOMMENDED_ARCHIVE_DAYS"
+    echo "Grace period: $(fmt_grace "$(get_grace)") — default ${RECOMMENDED_GRACE}s"
     echo "Recent list (menu): $(get_recent_count) line(s)"
     echo "Last activity:"
     tail -n 5 "$LOG" 2>/dev/null || echo "  (no log yet)"
@@ -560,31 +566,31 @@ draw() {
     fi
     i_plain="Auto-run interval  every $ivf"
     if [ "$iv" = "$RECOMMENDED_INTERVAL" ]; then
-        i_col="Auto-run interval  ${GRN}every $ivf${R} ${DIM}(recommended)${R}"
+        i_col="Auto-run interval  ${GRN}every $ivf${R} ${DIM}(default)${R}"
     else
-        i_col="Auto-run interval  ${YEL}every $ivf${R} ${DIM}(rec $(fmt_interval "$RECOMMENDED_INTERVAL"))${R}"
+        i_col="Auto-run interval  ${YEL}every $ivf${R} ${DIM}(default $(fmt_interval "$RECOMMENDED_INTERVAL"))${R}"
     fi
     a_plain="Archive age        $ad days"
     if [ "$ad" = "$RECOMMENDED_ARCHIVE_DAYS" ]; then
-        a_col="Archive age        ${GRN}$ad days${R} ${DIM}(recommended)${R}"
+        a_col="Archive age        ${GRN}$ad days${R} ${DIM}(default)${R}"
     else
-        a_col="Archive age        ${YEL}$ad days${R} ${DIM}(rec $RECOMMENDED_ARCHIVE_DAYS)${R}"
+        a_col="Archive age        ${YEL}$ad days${R} ${DIM}(default $RECOMMENDED_ARCHIVE_DAYS)${R}"
     fi
     gp_plain="Grace period       $gpf"
     if [ "$gp" = "$RECOMMENDED_GRACE" ]; then
-        gp_col="Grace period       ${GRN}$gpf${R} ${DIM}(recommended)${R}"
+        gp_col="Grace period       ${GRN}$gpf${R} ${DIM}(default)${R}"
     else
-        gp_col="Grace period       ${YEL}$gpf${R} ${DIM}(rec ${RECOMMENDED_GRACE}s)${R}"
+        gp_col="Grace period       ${YEL}$gpf${R} ${DIM}(default ${RECOMMENDED_GRACE}s)${R}"
     fi
     if [ "$rc" = 0 ]; then
         rc_plain="Recent activity    hidden"
-        rc_col="Recent activity    ${DIM}hidden${R} ${DIM}(rec $RECOMMENDED_RECENT)${R}"
+        rc_col="Recent activity    ${DIM}hidden${R} ${DIM}(default $RECOMMENDED_RECENT)${R}"
     elif [ "$rc" = "$RECOMMENDED_RECENT" ]; then
         rc_plain="Recent activity    $rc lines"
-        rc_col="Recent activity    ${GRN}$rc lines${R} ${DIM}(recommended)${R}"
+        rc_col="Recent activity    ${GRN}$rc lines${R} ${DIM}(default)${R}"
     else
         rc_plain="Recent activity    $rc lines"
-        rc_col="Recent activity    ${YEL}$rc lines${R} ${DIM}(rec $RECOMMENDED_RECENT)${R}"
+        rc_col="Recent activity    ${YEL}$rc lines${R} ${DIM}(default $RECOMMENDED_RECENT)${R}"
     fi
     local g_plain g_col d_plain d_col lf lf_plain lf_col ss_plain ss_col mt_plain mt_col au_plain au_col uu_plain uu_col
     if aging_is_on; then
@@ -600,13 +606,13 @@ draw() {
     lf=$(get_largefile)
     if [ "$lf" = 0 ]; then
         lf_plain="Big files          off"
-        lf_col="Big files          ${DIM}off${R} ${DIM}(rec ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
+        lf_col="Big files          ${DIM}off${R} ${DIM}(default ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
     elif [ "$lf" = "$RECOMMENDED_LARGEFILE_GB" ]; then
         lf_plain="Big files          ≥ $lf GB"
-        lf_col="Big files          ${GRN}≥ $lf GB${R} ${DIM}(recommended)${R}"
+        lf_col="Big files          ${GRN}≥ $lf GB${R} ${DIM}(default)${R}"
     else
         lf_plain="Big files          ≥ $lf GB"
-        lf_col="Big files          ${YEL}≥ $lf GB${R} ${DIM}(rec ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
+        lf_col="Big files          ${YEL}≥ $lf GB${R} ${DIM}(default ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
     fi
     if ss_is_on; then
         ss_plain="Screenshot dating  ● ON";  ss_col="Screenshot dating  ${GRN}● ON${R}"
@@ -744,7 +750,7 @@ pick_interval() {
         printf '  %sHow often the backup timer runs. New downloads still sort instantly%s\n' "$DIM" "$R"
         printf '  %svia folder-watching — this timer is only a safety net.%s\n\n' "$DIM" "$R"
         for i in "${!opts[@]}"; do
-            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_INTERVAL" ] && mark=" ${DIM}· recommended${R}"
+            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_INTERVAL" ] && mark=" ${DIM}· default${R}"
             curmark=""; [ "${opts[$i]}" = "$cur" ] && curmark=" ${GRN}· current${R}"
             if [ "$i" -eq "$sel" ]; then
                 printf '   %s ▸ %d. %-11s %s%s%s\n' "$REV" "$((i+1))" "${labels[$i]}" "$R" "$mark" "$curmark"
@@ -777,7 +783,7 @@ pick_largefile() {
         printf '  %sFiles at or above this size go to Large Files/ for you to handle%s\n' "$DIM" "$R"
         printf '  %sdeliberately — they are never auto-archived.%s\n\n' "$DIM" "$R"
         for i in "${!opts[@]}"; do
-            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_LARGEFILE_GB" ] && mark=" ${DIM}· recommended${R}"
+            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_LARGEFILE_GB" ] && mark=" ${DIM}· default${R}"
             curmark=""; [ "${opts[$i]}" = "$cur" ] && curmark=" ${GRN}· current${R}"
             if [ "$i" -eq "$sel" ]; then
                 printf '   %s ▸ %d. %-22s %s%s%s\n' "$REV" "$((i+1))" "${labels[$i]}" "$R" "$mark" "$curmark"
@@ -803,35 +809,49 @@ prompt_archivedays() {
     printf '\033[?25h'
     printf '\n  %sChange archive age%s\n' "$BLD" "$R"
     printf '  Files older than this (modified date) move into Archive/.\n'
-    printf '  Current: %s days   %sRecommended: %s days%s\n' "$cur" "$DIM" "$RECOMMENDED_ARCHIVE_DAYS" "$R"
-    printf '  Days, %sr%s = recommended, blank = keep: ' "$BLD" "$R"
+    printf '  Current: %s days   %sDefault: %s days%s\n' "$cur" "$DIM" "$RECOMMENDED_ARCHIVE_DAYS" "$R"
+    printf '  Days, %sd%s = default, blank = keep: ' "$BLD" "$R"
     IFS= read -r input
     printf '\033[?25l'
     case "$input" in
         "")        MSG="Archive age unchanged ($cur days)" ;;
-        r|R)       set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && MSG="Archive age → $RECOMMENDED_ARCHIVE_DAYS days (recommended)" ;;
+        d|D|r|R)   set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && MSG="Archive age → $RECOMMENDED_ARCHIVE_DAYS days (default)" ;;
         *[!0-9]*)  MSG="Invalid — digits only" ;;
         *)         if set_archivedays "$input"; then MSG="Archive age → $input days"; else MSG="Unchanged (minimum 1)"; fi ;;
     esac
 }
 
-prompt_grace() {
-    local cur input
+# arrow-key picker for the grace period — spans seconds → days, up to 7 days
+pick_grace() {
+    local opts=(0 30 60 300 900 3600 21600 43200 86400 259200 604800)
+    local labels=("Immediate — sort right away" "30 seconds" "1 minute" "5 minutes" "15 minutes" "1 hour" "6 hours" "12 hours" "1 day" "3 days" "7 days")
+    local cur sel=2 i k mark curmark
     cur=$(get_grace)
-    printf '\033[?25h'
-    printf '\n  %sChange grace period%s\n' "$BLD" "$R"
-    printf '  How long a download must sit still before it gets sorted.\n'
-    printf '  Longer = safer for big/slow downloads; 0 = sort immediately.\n'
-    printf '  Current: %s   %sRecommended: %ss%s\n' "$(fmt_grace "$cur")" "$DIM" "$RECOMMENDED_GRACE" "$R"
-    printf '  Seconds, %sr%s = recommended, blank = keep: ' "$BLD" "$R"
-    IFS= read -r input
-    printf '\033[?25l'
-    case "$input" in
-        "")        MSG="Grace period unchanged ($(fmt_grace "$cur"))" ;;
-        r|R)       set_grace "$RECOMMENDED_GRACE" && MSG="Grace period → $(fmt_grace "$RECOMMENDED_GRACE")" ;;
-        *[!0-9]*)  MSG="Invalid — digits only (seconds)" ;;
-        *)         if set_grace "$input"; then MSG="Grace period → $(fmt_grace "$input")"; else MSG="Unchanged (0–86400 seconds)"; fi ;;
-    esac
+    for i in "${!opts[@]}"; do [ "${opts[$i]}" = "$cur" ] && sel="$i"; done
+    while :; do
+        printf '\033[H\033[2J'
+        printf '\n  %sGrace period%s\n' "$BLD" "$R"
+        printf '  %sHow long a new download must sit still before it gets sorted.%s\n' "$DIM" "$R"
+        printf '  %sLonger is safer for big or slow downloads.%s\n\n' "$DIM" "$R"
+        for i in "${!opts[@]}"; do
+            mark="";    [ "${opts[$i]}" = "$RECOMMENDED_GRACE" ] && mark=" ${DIM}· default${R}"
+            curmark=""; [ "${opts[$i]}" = "$cur" ] && curmark=" ${GRN}· current${R}"
+            if [ "$i" -eq "$sel" ]; then
+                printf '   %s ▸ %2d. %-26s %s%s%s\n' "$REV" "$((i+1))" "${labels[$i]}" "$R" "$mark" "$curmark"
+            else
+                printf '     %2d. %-26s%s%s\n' "$((i+1))" "${labels[$i]}" "$mark" "$curmark"
+            fi
+        done
+        printf '\n  %s↑/↓ move · 1-9 jump · enter select · esc cancel%s' "$DIM" "$R"
+        k=$(read_key)
+        case "$k" in
+            up|k)   sel=$(( (sel + ${#opts[@]} - 1) % ${#opts[@]} )) ;;
+            down|j) sel=$(( (sel + 1) % ${#opts[@]} )) ;;
+            [1-9])  sel=$((k-1)) ;;
+            "")     set_grace "${opts[$sel]}" && MSG="Grace period → $(fmt_grace "${opts[$sel]}")" || MSG="Could not set grace period"; return ;;
+            q|esc)  MSG="Grace period unchanged"; return ;;
+        esac
+    done
 }
 
 prompt_recent() {
@@ -840,13 +860,13 @@ prompt_recent() {
     printf '\033[?25h'
     printf '\n  %sRecent activity on the menu%s\n' "$BLD" "$R"
     printf '  How many recent moves to list under the main menu.\n'
-    printf '  Current: %s   %sRecommended: %s · 0 hides the list%s\n' "$cur" "$DIM" "$RECOMMENDED_RECENT" "$R"
-    printf '  A number 0–10, %sr%s = recommended, blank = keep: ' "$BLD" "$R"
+    printf '  Current: %s   %sDefault: %s · 0 hides the list%s\n' "$cur" "$DIM" "$RECOMMENDED_RECENT" "$R"
+    printf '  A number 0–10, %sd%s = default, blank = keep: ' "$BLD" "$R"
     IFS= read -r input
     printf '\033[?25l'
     case "$input" in
         "")        MSG="Recent activity unchanged ($cur)" ;;
-        r|R)       set_recent_count "$RECOMMENDED_RECENT" && MSG="Recent activity → $RECOMMENDED_RECENT lines" ;;
+        d|D|r|R)   set_recent_count "$RECOMMENDED_RECENT" && MSG="Recent activity → $RECOMMENDED_RECENT lines" ;;
         *[!0-9]*)  MSG="Invalid — digits only" ;;
         *)         if set_recent_count "$input"; then [ "$input" = 0 ] && MSG="Recent activity list hidden" || MSG="Recent activity → $input line(s)"; else MSG="Unchanged (0–10)"; fi ;;
     esac
@@ -1172,9 +1192,9 @@ EOF
        dsort notify | cleannames | aging | duplicates   on|off
        dsort screenshotdate | metanames | autounzip | autoupdate   on|off
 
-       dsort interval [secs|r]      archivedays [days|r]
-       dsort graceperiod [secs|r]   largefiles [GB|r]
-       dsort recentcount [0-10|r]   exclude / only  [items|clear]
+       dsort interval [secs|d]      archivedays [days|d]
+       dsort graceperiod [secs|d]   largefiles [GB|d]
+       dsort recentcount [0-10|d]   exclude / only  [items|clear]
 
        dsort on | off           enable/disable the whole sorter
 EOF
@@ -1380,7 +1400,7 @@ activate() {
             0)  toggle_notify ;;
             1)  toggle_cleannames ;;
             2)  pick_interval ;;
-            3)  prompt_grace ;;
+            3)  pick_grace ;;
             4)  prompt_archivedays ;;
             5)  toggle_aging ;;
             6)  toggle_duplicates ;;
@@ -1484,11 +1504,11 @@ case "$1" in
     largefiles)
         if [ -n "$2" ]; then
             case "$2" in
-                r|recommended) set_largefile "$RECOMMENDED_LARGEFILE_GB" && echo "Big-file quarantine: ≥ $RECOMMENDED_LARGEFILE_GB GB (recommended)" ;;
+                r|recommended|d|default) set_largefile "$RECOMMENDED_LARGEFILE_GB" && echo "Big-file quarantine: ≥ $RECOMMENDED_LARGEFILE_GB GB (default)" ;;
                 *) if set_largefile "$2"; then [ "$2" = 0 ] && echo "Big-file quarantine: OFF" || echo "Big-file quarantine: ≥ $2 GB → Large Files/"; else echo "Invalid (whole-number GB, 0 = off)." >&2; exit 1; fi ;;
             esac
         else
-            lf=$(get_largefile); [ "$lf" = 0 ] && echo "Big-file quarantine: OFF (recommended $RECOMMENDED_LARGEFILE_GB GB)" || echo "Big-file quarantine: ≥ $lf GB (recommended $RECOMMENDED_LARGEFILE_GB GB)"
+            lf=$(get_largefile); [ "$lf" = 0 ] && echo "Big-file quarantine: OFF (default $RECOMMENDED_LARGEFILE_GB GB)" || echo "Big-file quarantine: ≥ $lf GB (default $RECOMMENDED_LARGEFILE_GB GB)"
         fi ;;
     screenshotdate)
         case "$2" in
@@ -1517,40 +1537,40 @@ case "$1" in
     interval)
         if [ -n "$2" ]; then
             case "$2" in
-                r|recommended) set_interval "$RECOMMENDED_INTERVAL" && echo "Auto-run interval: every $(fmt_interval "$RECOMMENDED_INTERVAL") (recommended)" ;;
+                r|recommended|d|default) set_interval "$RECOMMENDED_INTERVAL" && echo "Auto-run interval: every $(fmt_interval "$RECOMMENDED_INTERVAL") (default)" ;;
                 *) if set_interval "$2"; then echo "Auto-run interval: every $(fmt_interval "$2")"; else echo "Invalid (digits only, minimum 60s)." >&2; exit 1; fi ;;
             esac
         else
             iv=$(get_interval)
             echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s)"
-            echo "Recommended:       every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
+            echo "Default:       every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
         fi ;;
     archivedays)
         if [ -n "$2" ]; then
             case "$2" in
-                r|recommended) set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && echo "Archive age: $RECOMMENDED_ARCHIVE_DAYS days (recommended)" ;;
+                r|recommended|d|default) set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && echo "Archive age: $RECOMMENDED_ARCHIVE_DAYS days (default)" ;;
                 *) if set_archivedays "$2"; then echo "Archive age: $2 days"; else echo "Invalid (whole number ≥ 1)." >&2; exit 1; fi ;;
             esac
         else
-            echo "Archive age: $(get_archivedays) days (recommended $RECOMMENDED_ARCHIVE_DAYS)"
+            echo "Archive age: $(get_archivedays) days (default $RECOMMENDED_ARCHIVE_DAYS)"
         fi ;;
     graceperiod|grace)
         if [ -n "$2" ]; then
             case "$2" in
-                r|recommended) set_grace "$RECOMMENDED_GRACE" && echo "Grace period: $(fmt_grace "$RECOMMENDED_GRACE")" ;;
-                *) if set_grace "$2"; then echo "Grace period: $(fmt_grace "$2") before a download is sorted"; else echo "Invalid (whole seconds, 0–86400; 0 = immediate)." >&2; exit 1; fi ;;
+                r|recommended|d|default) set_grace "$RECOMMENDED_GRACE" && echo "Grace period: $(fmt_grace "$RECOMMENDED_GRACE")" ;;
+                *) if set_grace "$2"; then echo "Grace period: $(fmt_grace "$2") before a download is sorted"; else echo "Invalid (whole seconds, 0–604800 / max 7 days; 0 = immediate)." >&2; exit 1; fi ;;
             esac
         else
-            echo "Grace period: $(fmt_grace "$(get_grace)") (recommended ${RECOMMENDED_GRACE}s)"
+            echo "Grace period: $(fmt_grace "$(get_grace)") (default ${RECOMMENDED_GRACE}s)"
         fi ;;
     recentcount|recent)
         if [ -n "$2" ]; then
             case "$2" in
-                r|recommended) set_recent_count "$RECOMMENDED_RECENT" && echo "Recent activity: $RECOMMENDED_RECENT lines on the menu" ;;
+                r|recommended|d|default) set_recent_count "$RECOMMENDED_RECENT" && echo "Recent activity: $RECOMMENDED_RECENT lines on the menu" ;;
                 *) if set_recent_count "$2"; then [ "$2" = 0 ] && echo "Recent activity list: hidden" || echo "Recent activity: $2 line(s) on the menu"; else echo "Invalid (whole number 0–10)." >&2; exit 1; fi ;;
             esac
         else
-            echo "Recent activity: $(get_recent_count) line(s) on the menu (recommended $RECOMMENDED_RECENT)"
+            echo "Recent activity: $(get_recent_count) line(s) on the menu (default $RECOMMENDED_RECENT)"
         fi ;;
     preview)
         run_preview ;;
@@ -1600,12 +1620,15 @@ Usage: dsort <command>   (bare = interactive UI)
   cleannames on|off   opt-in filename cleanup
   aging on|off        weekly nudge for Archive files over a year old
   duplicates on|off   route byte-identical files to Duplicates/
-  largefiles [n|r]    GB threshold for Large Files/ (0 = off, r = recommended)
+  largefiles [n|d]    GB threshold for Large Files/ (0 = off, d = default)
   screenshotdate on|off  date-prefix screenshots + bucket by month
   metanames on|off    opt-in: rename PDFs from their embedded title
   autounzip on|off    opt-in: expand .zip into a same-named subfolder
-  interval [secs|r]   show/set safety-net auto-run cadence (r = recommended)
-  archivedays [n|r]   show/set Archive age in days (r = recommended)
+  interval [secs|d]   show/set safety-net auto-run cadence (d = default)
+  graceperiod [secs|d]  settle time before a download is sorted (max 7 days)
+  archivedays [n|d]   show/set Archive age in days (d = default)
+  recentcount [0-10|d]  recent moves listed under the menu (0 = hide)
+  find <name>         where a download got filed
   version             print the installed version
   update              download + install the latest version from GitHub
 USAGE

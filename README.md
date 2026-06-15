@@ -116,12 +116,12 @@ dsort screenshotdate on|off
 dsort metanames on|off
 dsort autounzip on|off
 
-# tunables (r = recommended)
-dsort interval [seconds|r]
-dsort graceperiod [seconds|r]   # how long a download settles before sorting (0 = immediate)
-dsort archivedays [days|r]
-dsort largefiles [GB|r]     # 0 = off
-dsort recentcount [0-10|r]  # recent moves listed under the main menu (0 = hide)
+# tunables (d = default)
+dsort interval [seconds|d]
+dsort graceperiod [seconds|d]   # settle time before sorting (0 = immediate, max 7 days)
+dsort archivedays [days|d]
+dsort largefiles [GB|d]     # 0 = off
+dsort recentcount [0-10|d]  # recent moves listed under the main menu (0 = hide)
 
 dsort on|off          # enable/disable the whole sorter
 ```
@@ -146,7 +146,7 @@ dsort on|off          # enable/disable the whole sorter
 - **Metadata naming** — renames PDFs from their embedded title (via Spotlight’s `mdls`).
 - **Auto‑unzip** — expands `.zip` files into a same‑named subfolder (size‑guarded against zip‑bombs; contents are not re‑sorted).
 
-**Tunables** — the auto‑run interval and big‑file size are arrow‑key pickers; the archive age is a number entry. Each shows a recommended value so you can always get back to a sensible default.
+**Tunables** — the auto‑run interval, grace period, and big‑file size are arrow‑key pickers (the grace period spans seconds → days, up to 7 days); archive age and recent‑count are number entries. Each marks its **default** so you can always get back to a sensible setting.
 
 ### Custom rules
 
