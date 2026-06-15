@@ -522,7 +522,7 @@ notify() {
         body="Archived $ARCHIVE_COUNT file(s) older than ${ARCHIVE_DAYS}d"
     fi
     [ ${#body} -gt 160 ] && body="${body:0:157}..."
-    "$NOTIFIER" "$body" "Downloads sorted" >/dev/null 2>>"$LOG"
+    DSORT_BODY="$body" DSORT_TITLE="Downloads sorted" "$NOTIFIER" >/dev/null 2>>"$LOG"
 }
 
 # preview — dry run: print where each loose top-level file WOULD go (and, if
@@ -601,7 +601,7 @@ aging_notice() {
     [ "${old:-0}" -gt 0 ] || return
     touch "$AGING_STAMP"                                   # mark the week regardless of mute
     [ -e "$NONOTIFY_FLAG" ] && return
-    "$NOTIFIER" "$old file(s) in Archive over a year old — review?" "Downloads sorter" >/dev/null 2>>"$LOG"
+    DSORT_BODY="$old file(s) in Archive over a year old — review?" DSORT_TITLE="Downloads sorter" "$NOTIFIER" >/dev/null 2>>"$LOG"
 }
 
 # digest_notice — opt-in weekly summary of what was sorted, from the log. At most
@@ -633,7 +633,7 @@ digest_notice() {
     touch "$DIGEST_STAMP"                                  # mark the week regardless of mute
     log "weekly digest: $body"
     [ -e "$NONOTIFY_FLAG" ] && return
-    "$NOTIFIER" "$body" "Downloads — weekly digest" >/dev/null 2>>"$LOG"
+    DSORT_BODY="$body" DSORT_TITLE="Downloads — weekly digest" "$NOTIFIER" >/dev/null 2>>"$LOG"
 }
 
 # category_map — "Category|what routes there" for the Help "Folder categories"

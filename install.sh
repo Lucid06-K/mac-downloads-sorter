@@ -58,24 +58,48 @@ else
     info "OrganizeDownloads.app already present — keeping it (preserves its permission)"
 fi
 
-if [ ! -d "$NOTIFY_APP" ]; then
-    TMP_AS="$(mktemp -t dnotify).applescript"
-    cat > "$TMP_AS" <<'AS'
-on run argv
+# The applet receives the notification body/title via environment variables
+# (DSORT_BODY / DSORT_TITLE). An osacompile applet's binary does NOT receive
+# command-line argv, so the sorter passes the message through the environment;
+# argv is kept only as a fallback for `osascript`-style invocation.
+NOTIFY_AS='on run argv
+    set theTitle to "Downloads sorted"
+    set theBody to ""
     try
-        display notification (item 1 of argv) with title (item 2 of argv)
-    on error
-        display notification "Downloads sorted"
+        set theBody to (system attribute "DSORT_BODY")
     end try
-end run
-AS
-    osacompile -o "$NOTIFY_APP" "$TMP_AS"; rm -f "$TMP_AS"
+    try
+        set tt to (system attribute "DSORT_TITLE")
+        if tt is not "" then set theTitle to tt
+    end try
+    if theBody is "" then
+        try
+            set theBody to (item 1 of argv)
+            set theTitle to (item 2 of argv)
+        end try
+    end if
+    if theBody is "" then set theBody to "Sorted your downloads"
+    display notification theBody with title theTitle
+end run'
+if [ ! -d "$NOTIFY_APP" ]; then
+    osacompile -o "$NOTIFY_APP" -e "$NOTIFY_AS"
     /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.downloads-sorter.notifier" \
         "$NOTIFY_APP/Contents/Info.plist" 2>/dev/null || true
     codesign --force --sign - "$NOTIFY_APP" 2>/dev/null || true
     ok "Built DownloadsNotifier.app (notifications)"
+elif ! osadecompile "$NOTIFY_APP/Contents/Resources/Scripts/main.scpt" 2>/dev/null | grep -q DSORT_BODY; then
+    # existing app has the old script that couldn't receive the message body —
+    # refresh just the script in place, keeping the bundle id so the macOS
+    # notification permission is preserved.
+    TMP_SCPT="$(mktemp -d)/main.scpt"
+    if osacompile -o "$TMP_SCPT" -e "$NOTIFY_AS" 2>/dev/null; then
+        cp "$TMP_SCPT" "$NOTIFY_APP/Contents/Resources/Scripts/main.scpt"
+        codesign --force --sign - "$NOTIFY_APP" 2>/dev/null || true
+        ok "Refreshed DownloadsNotifier.app (fixes the notification text; permission kept)"
+    fi
+    rm -rf "$(dirname "$TMP_SCPT")"
 else
-    info "DownloadsNotifier.app already present — keeping it (preserves its permission)"
+    info "DownloadsNotifier.app already present and current — keeping it"
 fi
 
 # 3) launch agent (paths templated to THIS user) ----------------------------
@@ -137,7 +161,7 @@ info "1) Files & Folders → access to your Downloads folder (so it can sort)"
 info "2) Notifications → so it can tell you what it sorted"
 echo
 # trigger the notification permission prompt
-"$NOTIFY_APP/Contents/MacOS/applet" "Downloads Sorter is installed 🎉" "Downloads Sorter" >/dev/null 2>&1 || true
+DSORT_BODY="Downloads Sorter is installed 🎉" DSORT_TITLE="Downloads Sorter" "$NOTIFY_APP/Contents/MacOS/applet" >/dev/null 2>&1 || true
 # launch the organizer interactively so the Downloads-access prompt appears
 open "$ORG_APP" 2>/dev/null || true
 sleep 1
