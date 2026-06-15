@@ -359,9 +359,20 @@ move_to() {
     fi
 }
 
+# True if <file> is a cloud "online-only" placeholder — iCloud "Optimize Mac
+# Storage", or a File-Provider cloud (Dropbox / OneDrive / Google Drive). Its
+# bytes aren't on disk, so hashing or unzipping it would force a full download.
+# SF_DATALESS = 0x40000000 in the file's st_flags (stat -f %f).
+is_dataless() {
+    local fl; fl=$(stat -f %f "$1" 2>/dev/null) || return 1
+    case "$fl" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$(( fl & 1073741824 ))" -ne 0 ]
+}
+
 # Phase 1: sort loose files sitting at the top level of Downloads.
 scan() {
     YOUNG_SKIPPED=0
+    DATALESS_SKIPPED=0
     WAIT=0
     local now f base ext mtime need rel sz ssrel ssname mname
     now=$(date +%s)
@@ -377,6 +388,14 @@ scan() {
         case "$ext" in                                # in-progress downloads
             crdownload|download|part|partial|tmp|opdownload|aria2|'!ut') continue ;;
         esac
+
+        # cloud "online-only" placeholder (iCloud / Dropbox / OneDrive): the bytes
+        # aren't on disk. Leave it put — moving or hashing it would force a full
+        # download. It sorts normally once you've actually downloaded it.
+        if is_dataless "$f"; then
+            DATALESS_SKIPPED=$((DATALESS_SKIPPED+1))
+            continue
+        fi
 
         # too fresh — note it so we can wait it out and rescan before exiting
         mtime=$(stat -f %m "$f" 2>/dev/null) || continue
@@ -420,6 +439,7 @@ scan() {
         fi
         move_to "$f" "$rel"
     done
+    [ "$DATALESS_SKIPPED" -gt 0 ] && log "skipped $DATALESS_SKIPPED online-only (cloud) file(s) — not downloaded yet"
 }
 
 # Phase 2: sweep files older than ARCHIVE_DAYS out of the live category folders
