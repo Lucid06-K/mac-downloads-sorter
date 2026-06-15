@@ -41,7 +41,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.16"
+VERSION="1.0.17"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -368,10 +368,30 @@ render_categories() (
     echo
 )
 
-# full-screen Folder-categories view (paged through less, since the list is long)
+# Scrollable, read-only Folder-categories view. Built in-TUI (no `less`) so the
+# exit and the on-screen hint match the rest of the menu and there's no
+# alternate-screen nesting. Scrolls when the list is taller than the window.
 do_categories() {
-    if command -v less >/dev/null 2>&1; then render_categories | less -R
-    else printf '\033[H\033[2J'; render_categories; _pause; fi
+    local lines=() ln top=0 i H rows maxtop frame foot key
+    while IFS= read -r ln; do lines+=("$ln"); done < <(render_categories)
+    printf '\033[?25l'
+    while :; do
+        H=$(tput lines 2>/dev/null); case "$H" in ''|*[!0-9]*) H=24 ;; esac
+        rows=$(( H - 2 )); [ "$rows" -lt 5 ] && rows=5
+        maxtop=$(( ${#lines[@]} - rows )); [ "$maxtop" -lt 0 ] && maxtop=0
+        [ "$top" -gt "$maxtop" ] && top="$maxtop"
+        frame=""
+        for (( i=top; i<top+rows && i<${#lines[@]}; i++ )); do frame="$frame${lines[$i]}"$'\n'; done
+        if [ "${#lines[@]}" -gt "$rows" ]; then foot="${DIM}↑/↓ scroll · q or esc to go back${R}"
+        else foot="${DIM}press q or esc to go back${R}"; fi
+        _paint "$frame"$'\n'"  $foot"
+        key=$(read_key)
+        case "$key" in
+            up|k)      [ "$top" -gt 0 ] && top=$((top-1)) ;;
+            down|j)    [ "$top" -lt "$maxtop" ] && top=$((top+1)) ;;
+            q|esc|"")  break ;;
+        esac
+    done
     printf '\033[?25l'; MSG=""
 }
 
@@ -557,7 +577,16 @@ describe_settings() {
     esac
 }
 
-draw() {
+# Paint a captured frame without the full-screen-wipe flicker: move home, redraw
+# each line clearing to end-of-line (so shrinking lines leave no artifacts), then
+# clear anything left below. One coherent repaint instead of blank-then-redraw.
+_paint() {
+    printf '\033[H'
+    printf '%s\n' "$1" | while IFS= read -r _pl || [ -n "$_pl" ]; do printf '%s\033[K\n' "$_pl"; done
+    printf '\033[J'
+}
+draw() { _paint "$(_draw_body)"; }
+_draw_body() {
     local s_plain s_col n_plain n_col c_plain c_col i_plain i_col a_plain a_col gp_plain gp_col rc_plain rc_col recent
     local iv ivf ad gp gpf rc
     iv=$(get_interval); ivf=$(fmt_interval "${iv:-0}"); ad=$(get_archivedays)
@@ -657,7 +686,6 @@ draw() {
     fi
 
     local SEP="${DIM}─────────────────────────────────────────────${R}"
-    printf '\033[H\033[2J'
     if [ "$SCREEN" = settings ]; then
         printf '\n  %s %s\n' "${BLD}Downloads Sorter${R}" "${DIM}· Settings${R}"
         printf '  %s\n' "$SEP"
