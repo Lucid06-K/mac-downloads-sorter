@@ -36,7 +36,7 @@ UPDATE_STAMP="$HOME/Library/Scripts/.organize_downloads.update_check"
 UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.2"
+VERSION="1.0.3"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -162,23 +162,37 @@ run_rules() (
     for i in "${!RULE_PAT[@]}"; do printf '   %-28s → %s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}"; done
 )
 
-# live "Folder categories" view: the real routing table + your custom rules
+# live "Folder categories" view: two columns (category | what routes there),
+# wrapped to the terminal width, plus your custom rules. Reads the real table.
 render_categories() (
     source "$SORTER" >/dev/null 2>&1
-    printf '  %sFOLDER CATEGORIES%s  %s— what routes to each (live)%s\n\n' "$BLD" "$R" "$DIM" "$R"
+    local W left cat exts wrapped ln first i
+    W=$(tput cols 2>/dev/null); case "$W" in ''|*[!0-9]*) W=80 ;; esac; [ "$W" -lt 56 ] && W=80
+    left=22; rightw=$(( W - left - 6 )); [ "$rightw" -lt 24 ] && rightw=24
+    printf '\n  %sFolder categories%s   %s— where each kind of file is filed%s\n\n' "$BLD" "$R" "$DIM" "$R"
     category_map | while IFS='|' read -r cat exts; do
-        printf '  %s%s%s\n' "$BLD" "$cat" "$R"
-        printf '%s\n' "$exts" | fold -s -w 62 | sed 's/^/       /'
-        echo
+        wrapped=$(printf '%s' "$exts" | fold -s -w "$rightw")
+        first=1
+        while IFS= read -r ln; do
+            if [ "$first" = 1 ]; then printf '  %s%-*s%s %s\n' "$BLD" "$left" "$cat" "$R" "$ln"; first=0
+            else printf '  %-*s %s\n' "$left" "" "$ln"; fi
+        done < <(printf '%s\n' "$wrapped")
     done
     if [ "${#RULE_PAT[@]}" -gt 0 ]; then
-        printf '  %s── YOUR CUSTOM RULES (checked first, override the above) ──%s\n\n' "$BLD" "$R"
-        for i in "${!RULE_PAT[@]}"; do printf '       %-26s →  %s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}"; done
-        echo
+        printf '\n  %sYour custom rules%s   %s(checked first — override the above)%s\n\n' "$BLD" "$R" "$DIM" "$R"
+        for i in "${!RULE_PAT[@]}"; do printf '  %s%-*s%s →  %s\n' "$GRN" "$left" "${RULE_PAT[$i]}" "$R" "${RULE_DEST[$i]}"; done
     else
-        printf '  %s(no custom rules yet — add some in Settings → Custom sorting rules)%s\n\n' "$DIM" "$R"
+        printf '\n  %sNo custom rules yet — add some in Settings → Custom sorting rules.%s\n' "$DIM" "$R"
     fi
+    echo
 )
+
+# full-screen Folder-categories view (paged through less, since the list is long)
+do_categories() {
+    if command -v less >/dev/null 2>&1; then render_categories | less -R
+    else printf '\033[H\033[2J'; render_categories; _pause; fi
+    printf '\033[?25l'; MSG=""
+}
 
 # fetch the latest scripts from the repo and install them. Security measures:
 #  • HTTPS only, even across redirects (--proto / --proto-redir '=https')
@@ -331,10 +345,11 @@ describe_settings() {
         8)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
         9)  echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
         10) echo "Opt-in: check GitHub daily on open and install verified updates automatically." ;;
-        11) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
-        12) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
-        13) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
-        14) echo "Return to the main menu." ;;
+        11) echo "See where every file type is filed (and your custom rules) — read-only." ;;
+        12) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
+        13) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
+        14) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
+        15) echo "Return to the main menu." ;;
     esac
 }
 
@@ -430,11 +445,12 @@ draw() {
         row 9 "$au_plain" "$au_col"
         row 10 "$uu_plain" "$uu_col"
         printf '  %s\n' "$SEP"
-        row 11 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
-        row 12 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
-        row 13 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
+        row 11 "Folder categories ▸"   "Folder categories ▸"
+        row 12 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
+        row 13 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
+        row 14 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
         printf '  %s\n' "$SEP"
-        row 14 "← Back to menu" "← Back to menu"
+        row 15 "← Back to menu" "← Back to menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -680,7 +696,7 @@ read_key() {
     fi
 }
 
-# help_topic <0-8> — prints one digestible, spaced-out section of the guide
+# help_topic <0-7> — prints one digestible, spaced-out section of the guide
 help_topic() {
     case "$1" in
     0) cat <<'EOF'
@@ -705,8 +721,7 @@ help_topic() {
   create yourself is left completely untouched.
 EOF
     ;;
-    1) render_categories ;;
-    2) cat <<'EOF'
+    1) cat <<'EOF'
   FEATURES (always on)
 
    •  Sorting
@@ -735,7 +750,7 @@ EOF
   Duplicates/ and Large Files/ are never auto-archived — they wait for you.
 EOF
     ;;
-    3) cat <<'EOF'
+    2) cat <<'EOF'
   SETTINGS & OPTIONS   (main menu → Settings ▸)
 
   Toggles:
@@ -763,7 +778,7 @@ EOF
        Auto-update          see the "Updating & security" topic
 EOF
     ;;
-    4) cat <<'EOF'
+    3) cat <<'EOF'
   EXCLUDE / ONLY-SORT FILTERS   (Settings ▸)
 
   Two multi-select checklists control what gets sorted — tick categories
@@ -785,7 +800,7 @@ EOF
        dsort exclude          (list)       dsort exclude clear
 EOF
     ;;
-    5) cat <<'EOF'
+    4) cat <<'EOF'
   CUSTOM SORTING RULES
 
   Send files matching a pattern to a folder of your choice — these override
@@ -805,7 +820,7 @@ EOF
    list them anytime with  dsort rules.)
 EOF
     ;;
-    6) cat <<'EOF'
+    5) cat <<'EOF'
   UPDATING & SECURITY
 
    •  "Check for updates" on the main menu, or run:  dsort update
@@ -826,7 +841,7 @@ EOF
        –  current scripts backed up to *.bak; never uses sudo
 EOF
     ;;
-    7) cat <<'EOF'
+    6) cat <<'EOF'
   SAFETY
 
    •  Never deletes or overwrites — uses a no-clobber move and adds " (2)"
@@ -841,7 +856,7 @@ EOF
       only reminds you. Nothing is ever auto-deleted.
 EOF
     ;;
-    8) cat <<'EOF'
+    7) cat <<'EOF'
   COMMANDS   (everything the menu does, scriptable)
 
        dsort                    open the menu
@@ -870,11 +885,10 @@ EOF
 do_help() {
     local topics=(
         "Overview — what it does & how it works"
-        "Folder categories"
         "Features"
         "Settings & options"
         "Exclude / only-sort filters"
-        "Custom rules"
+        "Custom sorting rules"
         "Updating & security"
         "Safety"
         "Commands (CLI)"
@@ -1074,10 +1088,11 @@ activate() {
             8)  toggle_metanames ;;
             9)  toggle_autounzip ;;
             10) toggle_autoupdate ;;
-            11) do_filter exclude ;;
-            12) do_filter only ;;
-            13) do_rules ;;
-            14) SCREEN=main; focus=6 ;;
+            11) do_categories ;;
+            12) do_filter exclude ;;
+            13) do_filter only ;;
+            14) do_rules ;;
+            15) SCREEN=main; focus=6 ;;
         esac
     else
         case "$focus" in
@@ -1103,7 +1118,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=15 || NROWS=10
+        [ "$SCREEN" = settings ] && NROWS=16 || NROWS=10
         draw
         MSG=""
         key=$(read_key) || break
