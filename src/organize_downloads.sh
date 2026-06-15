@@ -67,6 +67,11 @@ AGING_STAMP="$HOME/Library/Scripts/.organize_downloads.aging_last"
 DIGEST_FLAG="$HOME/Library/Scripts/organize_downloads.digest"
 DIGEST_STAMP="$HOME/Library/Scripts/.organize_downloads.digest_last"
 
+# optional Finder colour tags for category folders. One "Category|Colour" per
+# line (e.g. "Invoices & Receipts|Red"); empty/unset = no colouring. Applied to
+# the folders that exist after a run that did work. Opt-in via the menu.
+COLORS_FILE="$HOME/Library/Scripts/organize_downloads.foldercolors"
+
 # duplicate detection: a byte-identical name-collision goes to Duplicates/ instead
 # of "name (2)" so you can bulk-review. ON unless the flag exists.
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
@@ -656,6 +661,47 @@ Misc|anything not matched above
 EOF
 }
 
+# --- Finder colour tags for category folders -----------------------------
+# Finder's colour code for a name (empty for None/unknown). Standard mapping:
+# 1 Gray · 2 Green · 3 Purple · 4 Blue · 5 Yellow · 6 Red · 7 Orange.
+_color_code() {
+    case "$1" in
+        [Gg]ray|[Gg]rey) echo 1 ;;  [Gg]reen) echo 2 ;;  [Pp]urple) echo 3 ;;
+        [Bb]lue) echo 4 ;;          [Yy]ellow) echo 5 ;;  [Rr]ed) echo 6 ;;
+        [Oo]range) echo 7 ;;        *) echo "" ;;
+    esac
+}
+# set_folder_color <folder> <ColorName> — apply a Finder colour tag, or clear it
+# for None/empty. Uses the _kMDItemUserTags xattr (no Finder automation needed).
+# Best-effort and silent; needs only built-ins (plutil, xxd, xattr).
+set_folder_color() {
+    local folder="$1" name="$2" code tmp hex
+    [ -d "$folder" ] || return 0
+    code=$(_color_code "$name")
+    if [ -z "$code" ]; then
+        xattr -d com.apple.metadata:_kMDItemUserTags "$folder" 2>/dev/null
+        return 0
+    fi
+    tmp=$(mktemp) || return 0
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><array><string>%s\n%s</string></array></plist>' "$name" "$code" > "$tmp"
+    if plutil -convert binary1 "$tmp" 2>/dev/null; then
+        hex=$(xxd -p "$tmp" 2>/dev/null | tr -d '\n')
+        [ -n "$hex" ] && xattr -wx com.apple.metadata:_kMDItemUserTags "$hex" "$folder" 2>/dev/null
+    fi
+    rm -f "$tmp"
+}
+# apply saved colours to the category folders that exist. No-op (cheap exit)
+# unless the user has configured colours, so it costs nothing by default.
+apply_folder_colors() {
+    [ -s "$COLORS_FILE" ] || return 0
+    local cat color
+    while IFS='|' read -r cat color || [ -n "$cat" ]; do
+        case "$cat" in ''|'#'*) continue ;; esac
+        [ -n "$color" ] || continue
+        [ -d "$DIR/$cat" ] && set_folder_color "$DIR/$cat" "$color"
+    done < "$COLORS_FILE"
+}
+
 main() {
     : > "$UNDO_PARTIAL" 2>/dev/null              # fresh undo record for this run
     scan
@@ -680,6 +726,8 @@ main() {
         fi
     fi
     rm -f "$UNDO_PARTIAL" 2>/dev/null
+    # (re)apply folder colours after a run that created/touched category folders
+    if [ "$MOVE_COUNT" -gt 0 ] || [ "$ARCHIVE_COUNT" -gt 0 ]; then apply_folder_colors; fi
     notify
     aging_notice
     digest_notice

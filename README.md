@@ -104,6 +104,7 @@ dsort preview         # dry run — show where things would go (moves nothing)
 dsort undo            # revert the last run (repeat to keep stepping back)
 dsort find <name>     # "where did it go?" — locate a download in your sorted folders
 dsort stats           # counts + sizes per category
+dsort colours [..]    # Finder colour tags for category folders (list / set / clear)
 dsort rules           # list your custom rules
 dsort log [n]         # recent activity
 
@@ -166,6 +167,20 @@ source:*unimelb.edu.au* -> Course
 A normal pattern matches the **filename**. Prefix a pattern with **`source:`** to match the **download origin** instead — macOS tags each download with where it came from (`kMDItemWhereFroms`), so `source:*github.com*` files everything you got from GitHub, `source:*unimelb.edu.au*` everything from your university, and so on. The arrow may be `->` or `→`; `#` lines are comments. Rules are checked **before** the built‑in categories, in file order. List them with `dsort rules`.
 
 > Source rules need the file's origin metadata, which browsers attach automatically. Files created locally (no download origin) simply fall through to the normal filename/extension rules.
+
+### Colour‑code your folders
+
+Give any category folder a **Finder colour tag** so `~/Downloads` is colour‑coded at a glance — **Settings → Folder colours** (pick a category, pick a colour). The sorter re‑applies your colours automatically as it runs, so newly‑created category folders get tagged too.
+
+```sh
+dsort colours                          # list your colour assignments
+dsort colours "Invoices & Receipts" Red
+dsort colours "Media" Blue
+dsort colours "Media" None             # clear one
+dsort colours clear                    # clear all
+```
+
+Colours are the standard Finder set (Red, Orange, Yellow, Green, Blue, Purple, Gray). It uses the normal Finder tag metadata, so no extra permissions are needed.
 
 ### Limit what gets sorted
 
