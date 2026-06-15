@@ -572,12 +572,16 @@ preview() {
 # every empty dir under Archive/ (sorter fully owns it) plus the sorter's OWN
 # empty sub-buckets in the live tree. Never the category roots, never your folders.
 prune_empty() {
-    [ -d "$DIR/Archive" ] && find "$DIR/Archive" -mindepth 1 -type d -empty -delete 2>/dev/null
-    local b
-    for b in "Media/Images" "Media/Audio" "Media/Video" \
-             "Documents/PDFs" "Documents/Slides" "Documents/Spreadsheets" \
-             "Documents/Word & Text" "Documents/eBooks" "Documents/Web"; do
-        [ -d "$DIR/$b" ] && rmdir "$DIR/$b" 2>/dev/null   # rmdir only succeeds when empty
+    local d
+    # clear empty nested subfolders under the parents that nest (deepest first)
+    for d in Archive Screenshots Media Documents; do
+        [ -d "$DIR/$d" ] && find "$DIR/$d" -mindepth 1 -type d -empty -delete 2>/dev/null
+    done
+    # remove any now-empty managed category folder (e.g. Installers & Apps, Fonts
+    # after their files were archived). rmdir only removes truly-empty dirs, so it
+    # never touches a folder that still holds files — or one you created yourself.
+    for d in "${MANAGED_DIRS[@]}" "Duplicates" "Large Files"; do
+        [ -d "$DIR/$d" ] && rmdir "$DIR/$d" 2>/dev/null
     done
 }
 
