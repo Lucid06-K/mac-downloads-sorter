@@ -111,6 +111,7 @@ dsort log [n]         # recent activity
 dsort notify on|off
 dsort cleannames on|off
 dsort aging on|off
+dsort digest on|off       # opt-in: weekly "what got sorted" summary notification
 dsort duplicates on|off
 dsort screenshotdate on|off
 dsort metanames on|off
@@ -145,6 +146,7 @@ dsort on|off          # enable/disable the whole sorter
 - **Filename cleanup** — tidies messy names: strips URL junk (`%20`, `?token=…`), long random hash blobs, and trailing `copy`/`v2`. Conservative by design (it protects real names like `Chapter_03_Glycolysis`), and every rename is logged and undoable.
 - **Metadata naming** — renames PDFs from their embedded title (via Spotlight’s `mdls`).
 - **Auto‑unzip** — expands `.zip` files into a same‑named subfolder (size‑guarded against zip‑bombs; contents are not re‑sorted).
+- **Weekly digest** — a once‑a‑week notification summarising what got sorted that week (file count, archived count, top categories). Silent in weeks with no activity.
 
 **Tunables** — the auto‑run interval, grace period, and big‑file size are arrow‑key pickers (the grace period spans seconds → days, up to 7 days); archive age and recent‑count are number entries. Each marks its **default** so you can always get back to a sensible setting.
 

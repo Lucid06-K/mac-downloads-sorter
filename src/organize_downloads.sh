@@ -62,6 +62,11 @@ AGING_DAYS=365
 AGING_FLAG="$HOME/Library/Scripts/organize_downloads.noaging"
 AGING_STAMP="$HOME/Library/Scripts/.organize_downloads.aging_last"
 
+# weekly activity digest — opt-in (ON only while .digest exists); a once-a-week
+# notification summarising what got sorted. Throttled via DIGEST_STAMP.
+DIGEST_FLAG="$HOME/Library/Scripts/organize_downloads.digest"
+DIGEST_STAMP="$HOME/Library/Scripts/.organize_downloads.digest_last"
+
 # duplicate detection: a byte-identical name-collision goes to Duplicates/ instead
 # of "name (2)" so you can bulk-review. ON unless the flag exists.
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
@@ -590,6 +595,38 @@ aging_notice() {
     "$NOTIFIER" "$old file(s) in Archive over a year old — review?" "Downloads sorter" >/dev/null 2>>"$LOG"
 }
 
+# digest_notice — opt-in weekly summary of what was sorted, from the log. At most
+# once every 7 days; silent if there was no activity that week. Never deletes.
+digest_notice() {
+    [ -e "$DIGEST_FLAG" ] || return                       # opt-in, off by default
+    if [ -f "$DIGEST_STAMP" ]; then
+        local last now
+        last=$(stat -f %m "$DIGEST_STAMP" 2>/dev/null || echo 0)
+        now=$(date +%s)
+        [ $((now - last)) -lt 604800 ] && return          # already sent this week
+    fi
+    [ -r "$LOG" ] || return
+    local cutoff moves arch top body
+    cutoff=$(date -v-7d +%F 2>/dev/null) || return
+    moves=$(awk -v c="$cutoff" 'substr($0,1,10) >= c && substr($0,21,7)=="moved: "' "$LOG" 2>/dev/null | wc -l | tr -d ' ')
+    arch=$(awk  -v c="$cutoff" 'substr($0,1,10) >= c && substr($0,21,10)=="archived: "' "$LOG" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${moves:-0}" -eq 0 ] && [ "${arch:-0}" -eq 0 ]; then
+        touch "$DIGEST_STAMP"; return                     # nothing to report; reset the week
+    fi
+    # top two destination categories this week
+    top=$(awk -v c="$cutoff" 'substr($0,1,10) >= c && substr($0,21,7)=="moved: " {
+            n=split($0,p," -> "); d=p[n]; sub(/\/$/,"",d); print d }' "$LOG" 2>/dev/null \
+          | sort | uniq -c | sort -rn | head -2 \
+          | awk '{ c=$1; $1=""; sub(/^ +/,""); printf "%s (%d), ", $0, c }' | sed 's/, $//')
+    body="This week: sorted $moves file(s)"
+    [ "${arch:-0}" -gt 0 ] && body="$body · archived $arch"
+    [ -n "$top" ] && body="$body · top: $top"
+    touch "$DIGEST_STAMP"                                  # mark the week regardless of mute
+    log "weekly digest: $body"
+    [ -e "$NONOTIFY_FLAG" ] && return
+    "$NOTIFIER" "$body" "Downloads — weekly digest" >/dev/null 2>>"$LOG"
+}
+
 # category_map — "Category|what routes there" for the Help "Folder categories"
 # view. Display only; KEEP IN SYNC WITH classify() above.
 category_map() {
@@ -645,6 +682,7 @@ main() {
     rm -f "$UNDO_PARTIAL" 2>/dev/null
     notify
     aging_notice
+    digest_notice
 }
 
 # Run only when executed directly; allow `source` (migration helper) with no side effects.

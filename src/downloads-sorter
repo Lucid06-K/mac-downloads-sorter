@@ -26,6 +26,7 @@ AGEFILE="$HOME/Library/Scripts/organize_downloads.archivedays"
 GRACEFILE="$HOME/Library/Scripts/organize_downloads.graceperiod"
 RECENTFILE="$HOME/Library/Scripts/organize_downloads.recentcount"
 AGING_FLAG="$HOME/Library/Scripts/organize_downloads.noaging"
+DIGEST_FLAG="$HOME/Library/Scripts/organize_downloads.digest"
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
 LFFILE="$HOME/Library/Scripts/organize_downloads.largefilegb"
 SS_FLAG="$HOME/Library/Scripts/organize_downloads.noscreenshotdate"
@@ -39,7 +40,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.12"
+VERSION="1.0.13"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -54,6 +55,7 @@ is_loaded()    { launchctl print "$TARGET" >/dev/null 2>&1; }
 notify_is_on() { [ ! -e "$NONOTIFY_FLAG" ]; }
 clean_is_on()  { [ -e "$CLEANFLAG" ]; }
 aging_is_on()  { [ ! -e "$AGING_FLAG" ]; }   # weekly Archive nudge, default ON
+digest_is_on() { [ -e "$DIGEST_FLAG" ]; }    # weekly activity digest, opt-in (default OFF)
 dedup_is_on()  { [ ! -e "$DEDUP_FLAG" ]; }   # duplicates -> Duplicates/, default ON
 ss_is_on()     { [ ! -e "$SS_FLAG" ]; }      # screenshot date-prefix + buckets, default ON
 meta_is_on()   { [ -e "$META_FLAG" ]; }      # PDF metadata naming, opt-in OFF
@@ -452,6 +454,7 @@ show_status() {
     notify_is_on && echo "Notifications: ON" || echo "Notifications: OFF"
     clean_is_on  && echo "Filename cleanup: ON" || echo "Filename cleanup: OFF"
     aging_is_on  && echo "Aging nudge (weekly, Archive >1yr): ON" || echo "Aging nudge: OFF"
+    digest_is_on && echo "Weekly digest: ON (once-a-week summary)" || echo "Weekly digest: OFF (opt-in)"
     dedup_is_on  && echo "Duplicate routing: ON (identical → Duplicates/)" || echo "Duplicate routing: OFF"
     if [ "$(get_largefile)" = 0 ]; then echo "Big-file quarantine: OFF"
     else echo "Big-file quarantine: ≥ $(get_largefile) GB → Large Files/ (default $RECOMMENDED_LARGEFILE_GB)"; fi
@@ -541,11 +544,12 @@ describe_settings() {
         10) echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
         11) echo "Opt-in: check GitHub daily on open and install verified updates automatically." ;;
         12) echo "How many recent moves to list under the main menu (0 hides the list)." ;;
-        13) echo "See where every file type is filed (and your custom rules) — read-only." ;;
-        14) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
-        15) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
-        16) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
-        17) echo "Return to the main menu." ;;
+        13) echo "Opt-in: a once-a-week notification summarising what got sorted." ;;
+        14) echo "See where every file type is filed (and your custom rules) — read-only." ;;
+        15) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
+        16) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
+        17) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
+        18) echo "Return to the main menu." ;;
     esac
 }
 
@@ -641,6 +645,12 @@ draw() {
     else
         uu_plain="Auto-update        ○ OFF"; uu_col="Auto-update        ${DIM}○ OFF${R}"
     fi
+    local dg_plain dg_col
+    if digest_is_on; then
+        dg_plain="Weekly digest      ● ON";  dg_col="Weekly digest      ${GRN}● ON${R}"
+    else
+        dg_plain="Weekly digest      ○ OFF"; dg_col="Weekly digest      ${DIM}○ OFF${R}"
+    fi
 
     local SEP="${DIM}─────────────────────────────────────────────${R}"
     printf '\033[H\033[2J'
@@ -660,13 +670,14 @@ draw() {
         row 10 "$au_plain" "$au_col"
         row 11 "$uu_plain" "$uu_col"
         row 12 "$rc_plain" "$rc_col"
+        row 13 "$dg_plain" "$dg_col"
         printf '  %s\n' "$SEP"
-        row 13 "Folder categories ▸"   "Folder categories ▸"
-        row 14 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
-        row 15 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
-        row 16 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
+        row 14 "Folder categories ▸"   "Folder categories ▸"
+        row 15 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
+        row 16 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
+        row 17 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
         printf '  %s\n' "$SEP"
-        row 17 "← Back to menu" "← Back to menu"
+        row 18 "← Back to menu" "← Back to menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -717,6 +728,10 @@ toggle_cleannames() {
 toggle_aging() {
     if aging_is_on; then touch "$AGING_FLAG"; MSG="Aging nudge OFF"
     else rm -f "$AGING_FLAG"; MSG="Aging nudge ON — weekly heads-up for Archive files over a year old"; fi
+}
+toggle_digest() {
+    if digest_is_on; then rm -f "$DIGEST_FLAG"; MSG="Weekly digest OFF"
+    else touch "$DIGEST_FLAG"; MSG="Weekly digest ON — a once-a-week summary of what got sorted"; fi
 }
 
 toggle_duplicates() {
@@ -1208,6 +1223,7 @@ EOF
 
        dsort notify | cleannames | aging | duplicates   on|off
        dsort screenshotdate | metanames | autounzip | autoupdate   on|off
+       dsort digest on|off      weekly "what got sorted" summary
 
        dsort interval [secs|d]      archivedays [days|d]
        dsort graceperiod [secs|d]   largefiles [GB|d]
@@ -1470,11 +1486,12 @@ activate() {
             10) toggle_autounzip ;;
             11) toggle_autoupdate ;;
             12) prompt_recent ;;
-            13) do_categories ;;
-            14) do_filter exclude ;;
-            15) do_filter only ;;
-            16) do_rules ;;
-            17) SCREEN=main; focus=6 ;;
+            13) toggle_digest ;;
+            14) do_categories ;;
+            15) do_filter exclude ;;
+            16) do_filter only ;;
+            17) do_rules ;;
+            18) SCREEN=main; focus=6 ;;
         esac
     else
         case "$focus" in
@@ -1500,7 +1517,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=18 || NROWS=10
+        [ "$SCREEN" = settings ] && NROWS=19 || NROWS=10
         draw
         MSG=""
         key=$(read_key) || break
@@ -1554,6 +1571,12 @@ case "$1" in
             on)  rm -f "$AGING_FLAG"; echo "Aging nudge: ON" ;;
             off) touch "$AGING_FLAG"; echo "Aging nudge: OFF" ;;
             *)   aging_is_on && echo "Aging nudge: ON" || echo "Aging nudge: OFF" ;;
+        esac ;;
+    digest)
+        case "$2" in
+            on)  touch "$DIGEST_FLAG"; echo "Weekly digest: ON" ;;
+            off) rm -f "$DIGEST_FLAG"; echo "Weekly digest: OFF" ;;
+            *)   digest_is_on && echo "Weekly digest: ON" || echo "Weekly digest: OFF (opt-in)" ;;
         esac ;;
     duplicates)
         case "$2" in
@@ -1679,6 +1702,7 @@ Usage: dsort <command>   (bare = interactive UI)
   notify on|off       "Downloads sorted" notifications
   cleannames on|off   opt-in filename cleanup
   aging on|off        weekly nudge for Archive files over a year old
+  digest on|off       opt-in: weekly summary of what got sorted
   duplicates on|off   route byte-identical files to Duplicates/
   largefiles [n|d]    GB threshold for Large Files/ (0 = off, d = default)
   screenshotdate on|off  date-prefix screenshots + bucket by month
