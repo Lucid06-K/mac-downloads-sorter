@@ -254,4 +254,4 @@ macOS (uses `launchd`, `osacompile`, `ditto`, `mdls` — all built in). No Homeb
 
 ## License
 
-[Apache License 2.0](LICENSE) — © 2026 Lucid06‑K.
+[Apache License 2.0](LICENSE) — © 2026 Lucid06‑K (see [NOTICE](NOTICE)).
