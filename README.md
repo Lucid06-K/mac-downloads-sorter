@@ -102,6 +102,7 @@ dsort status          # show every current setting
 dsort run             # sort now
 dsort preview         # dry run — show where things would go (moves nothing)
 dsort undo            # revert the last run (repeat to keep stepping back)
+dsort find <name>     # "where did it go?" — locate a download in your sorted folders
 dsort stats           # counts + sizes per category
 dsort rules           # list your custom rules
 dsort log [n]         # recent activity

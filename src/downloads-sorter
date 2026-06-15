@@ -37,7 +37,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.6"
+VERSION="1.0.7"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -257,6 +257,34 @@ run_rules() (
     echo "Custom rules (checked before built-ins):"
     for i in "${!RULE_PAT[@]}"; do printf '   %-28s → %s\n' "${RULE_PAT[$i]}" "${RULE_DEST[$i]}"; done
 )
+
+# `dsort find <text>`: where did a download go? Case-insensitive substring search
+# across ~/Downloads (every sorted folder + Archive). Shows each hit's folder,
+# flags anything still loose at the top, and prints a ready-to-run reveal command.
+run_find() {
+    local q="$*" dir="$HOME/Downloads" count=0 line rel base sub first=""
+    [ -n "$q" ] || { echo "Usage: dsort find <part of a filename>"; return 1; }
+    [ -d "$dir" ] || { echo "No ~/Downloads folder found."; return 1; }
+    printf '  %sWhere did it go?%s  matches for "%s"\n\n' "$BLD" "$R" "$q"
+    while IFS= read -r line; do
+        rel="${line#"$dir"/}"; base="${rel##*/}"; sub="${rel%/*}"
+        if [ "$sub" = "$rel" ]; then
+            printf '   %s\n        %s· still loose at the top of Downloads (not sorted yet)%s\n' "$base" "$DIM" "$R"
+        else
+            printf '   %s\n        %sin%s  %s/\n' "$base" "$DIM" "$R" "$sub"
+        fi
+        [ -z "$first" ] && first="$line"
+        count=$((count+1))
+    done < <(find "$dir" -type f ! -path '*/.*' -iname "*$q*" 2>/dev/null | sort)
+    if [ "$count" -eq 0 ]; then
+        printf '   %sNothing matching "%s" under ~/Downloads.%s\n' "$DIM" "$q" "$R"; return 0
+    fi
+    if [ "$count" -eq 1 ]; then
+        printf '\n  %sReveal it in Finder:%s  open -R "%s"\n' "$DIM" "$R" "$first"
+    else
+        printf '\n  %s%d matches. Reveal one in Finder with:%s  open -R "<path above>"\n' "$DIM" "$count" "$R"
+    fi
+}
 
 # live "Folder categories" view: two columns (category | what routes there),
 # wrapped to the terminal width, plus your custom rules. Reads the real table.
@@ -1021,6 +1049,7 @@ EOF
        dsort run                sort now
        dsort preview            dry run (no moves)
        dsort undo               move the last run's files back
+       dsort find <name>        where did a download get filed?
        dsort stats              counts / sizes per category
        dsort rules              list custom rules
        dsort log [n]            recent activity
@@ -1395,6 +1424,8 @@ case "$1" in
         run_stats ;;
     rules)
         run_rules ;;
+    find)
+        shift; run_find "$@" ;;
     exclude|only)
         kind="$1"; [ "$kind" = only ] && ff="$ONLY_FILE" || ff="$EXCLUDE_FILE"
         case "${2:-}" in
