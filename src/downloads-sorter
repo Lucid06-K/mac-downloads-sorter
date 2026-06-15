@@ -23,6 +23,7 @@ LOG="$HOME/Library/Logs/organize-downloads.log"
 NONOTIFY_FLAG="$HOME/Library/Scripts/organize_downloads.nonotify"
 CLEANFLAG="$HOME/Library/Scripts/organize_downloads.cleannames"
 AGEFILE="$HOME/Library/Scripts/organize_downloads.archivedays"
+GRACEFILE="$HOME/Library/Scripts/organize_downloads.graceperiod"
 AGING_FLAG="$HOME/Library/Scripts/organize_downloads.noaging"
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
 LFFILE="$HOME/Library/Scripts/organize_downloads.largefilegb"
@@ -37,12 +38,13 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.8"
+VERSION="1.0.9"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
 RECOMMENDED_ARCHIVE_DAYS=30     # sweep files older than this into Archive/
 RECOMMENDED_LARGEFILE_GB=5      # files >= this go to Large Files/ for review
+RECOMMENDED_GRACE=60            # seconds to let a download settle before sorting
 
 R=$'\033[0m'; REV=$'\033[7m'; DIM=$'\033[2m'; GRN=$'\033[32m'; BLD=$'\033[1m'; YEL=$'\033[33m'
 
@@ -106,6 +108,28 @@ set_archivedays() {
     case "$d" in ""|*[!0-9]*) return 1 ;; esac
     [ "$d" -lt 1 ] && return 1
     printf '%s\n' "$d" > "$AGEFILE"
+}
+
+# grace period (in seconds) before a freshly-modified file is sorted; stored in
+# GRACEFILE, default RECOMMENDED_GRACE. 0 = sort immediately. Capped at 1 day.
+get_grace() {
+    local v=""
+    [ -r "$GRACEFILE" ] && v=$(tr -dc '0-9' < "$GRACEFILE" 2>/dev/null)
+    [ -n "$v" ] && echo "$v" || echo "$RECOMMENDED_GRACE"
+}
+set_grace() {
+    local s="$1"
+    case "$s" in ""|*[!0-9]*) return 1 ;; esac
+    [ "$s" -gt 86400 ] && return 1
+    printf '%s\n' "$s" > "$GRACEFILE"
+}
+# friendly seconds label: "0s (immediate)", "45s", "2m", "1m 30s"
+fmt_grace() {
+    local s="$1"
+    [ "$s" -eq 0 ] 2>/dev/null && { echo "0s (immediate)"; return; }
+    if [ "$s" -lt 120 ]; then echo "${s}s"
+    elif [ $((s % 60)) -eq 0 ]; then echo "$((s/60))m"
+    else echo "$((s/60))m $((s%60))s"; fi
 }
 
 # --- undo history (a stack of moves) ------------------------------------
@@ -415,6 +439,7 @@ show_status() {
     else echo "Sorting filter: off (sorting everything)"; fi
     echo "Auto-run interval: every $(fmt_interval "$iv") (${iv:-unset}s) — recommended every $(fmt_interval "$RECOMMENDED_INTERVAL") (${RECOMMENDED_INTERVAL}s)"
     echo "Archive age: $ad days — recommended $RECOMMENDED_ARCHIVE_DAYS"
+    echo "Grace period: $(fmt_grace "$(get_grace)") — recommended ${RECOMMENDED_GRACE}s"
     echo "Recent activity:"
     tail -n 5 "$LOG" 2>/dev/null || echo "  (no log yet)"
 }
@@ -461,26 +486,28 @@ describe_settings() {
         0)  echo "Show a banner after each sort, summarizing what moved where." ;;
         1)  echo "Tidy messy download names before filing — off by default, logged & undoable." ;;
         2)  echo "How often the backup timer runs; new files sort instantly via folder-watching." ;;
-        3)  echo "Files older than this move into Archive/, keeping the same folder structure." ;;
-        4)  echo "Weekly heads-up if Archive holds files over a year old. Never deletes." ;;
-        5)  echo "Byte-identical files go to Duplicates/ for bulk review instead of 'name (2)'." ;;
-        6)  echo "Files at/above this size go to Large Files/ to handle deliberately (never archived)." ;;
-        7)  echo "Rename screenshots to '2026-06-14 Screenshot.png' and file them by month." ;;
-        8)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
-        9)  echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
-        10) echo "Opt-in: check GitHub daily on open and install verified updates automatically." ;;
-        11) echo "See where every file type is filed (and your custom rules) — read-only." ;;
-        12) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
-        13) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
-        14) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
-        15) echo "Return to the main menu." ;;
+        3)  echo "How long a new download must sit still before it's sorted (0 = immediately)." ;;
+        4)  echo "Files older than this move into Archive/, keeping the same folder structure." ;;
+        5)  echo "Weekly heads-up if Archive holds files over a year old. Never deletes." ;;
+        6)  echo "Byte-identical files go to Duplicates/ for bulk review instead of 'name (2)'." ;;
+        7)  echo "Files at/above this size go to Large Files/ to handle deliberately (never archived)." ;;
+        8)  echo "Rename screenshots to '2026-06-14 Screenshot.png' and file them by month." ;;
+        9)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
+        10) echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
+        11) echo "Opt-in: check GitHub daily on open and install verified updates automatically." ;;
+        12) echo "See where every file type is filed (and your custom rules) — read-only." ;;
+        13) echo "Pick categories/file types to NEVER sort (left where they are)." ;;
+        14) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
+        15) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
+        16) echo "Return to the main menu." ;;
     esac
 }
 
 draw() {
-    local s_plain s_col n_plain n_col c_plain c_col i_plain i_col a_plain a_col recent
-    local iv ivf ad
+    local s_plain s_col n_plain n_col c_plain c_col i_plain i_col a_plain a_col gp_plain gp_col recent
+    local iv ivf ad gp gpf
     iv=$(get_interval); ivf=$(fmt_interval "${iv:-0}"); ad=$(get_archivedays)
+    gp=$(get_grace); gpf=$(fmt_grace "$gp")
 
     if is_loaded; then
         s_plain="Sorter             ● ON";  s_col="Sorter             ${GRN}● ON${R}"
@@ -508,6 +535,12 @@ draw() {
         a_col="Archive age        ${GRN}$ad days${R} ${DIM}(recommended)${R}"
     else
         a_col="Archive age        ${YEL}$ad days${R} ${DIM}(rec $RECOMMENDED_ARCHIVE_DAYS)${R}"
+    fi
+    gp_plain="Grace period       $gpf"
+    if [ "$gp" = "$RECOMMENDED_GRACE" ]; then
+        gp_col="Grace period       ${GRN}$gpf${R} ${DIM}(recommended)${R}"
+    else
+        gp_col="Grace period       ${YEL}$gpf${R} ${DIM}(rec ${RECOMMENDED_GRACE}s)${R}"
     fi
     local g_plain g_col d_plain d_col lf lf_plain lf_col ss_plain ss_col mt_plain mt_col au_plain au_col uu_plain uu_col
     if aging_is_on; then
@@ -560,21 +593,22 @@ draw() {
         row 0 "$n_plain"  "$n_col"
         row 1 "$c_plain"  "$c_col"
         row 2 "$i_plain"  "$i_col"
-        row 3 "$a_plain"  "$a_col"
-        row 4 "$g_plain"  "$g_col"
-        row 5 "$d_plain"  "$d_col"
-        row 6 "$lf_plain" "$lf_col"
-        row 7 "$ss_plain" "$ss_col"
-        row 8 "$mt_plain" "$mt_col"
-        row 9 "$au_plain" "$au_col"
-        row 10 "$uu_plain" "$uu_col"
+        row 3 "$gp_plain" "$gp_col"
+        row 4 "$a_plain"  "$a_col"
+        row 5 "$g_plain"  "$g_col"
+        row 6 "$d_plain"  "$d_col"
+        row 7 "$lf_plain" "$lf_col"
+        row 8 "$ss_plain" "$ss_col"
+        row 9 "$mt_plain" "$mt_col"
+        row 10 "$au_plain" "$au_col"
+        row 11 "$uu_plain" "$uu_col"
         printf '  %s\n' "$SEP"
-        row 11 "Folder categories ▸"   "Folder categories ▸"
-        row 12 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
-        row 13 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
-        row 14 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
+        row 12 "Folder categories ▸"   "Folder categories ▸"
+        row 13 "Exclude from sorting ▸" "Exclude from sorting ▸  ${DIM}($(filter_count exclude))${R}"
+        row 14 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
+        row 15 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
         printf '  %s\n' "$SEP"
-        row 15 "← Back to menu" "← Back to menu"
+        row 16 "← Back to menu" "← Back to menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -734,6 +768,25 @@ prompt_archivedays() {
         r|R)       set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && MSG="Archive age → $RECOMMENDED_ARCHIVE_DAYS days (recommended)" ;;
         *[!0-9]*)  MSG="Invalid — digits only" ;;
         *)         if set_archivedays "$input"; then MSG="Archive age → $input days"; else MSG="Unchanged (minimum 1)"; fi ;;
+    esac
+}
+
+prompt_grace() {
+    local cur input
+    cur=$(get_grace)
+    printf '\033[?25h'
+    printf '\n  %sChange grace period%s\n' "$BLD" "$R"
+    printf '  How long a download must sit still before it gets sorted.\n'
+    printf '  Longer = safer for big/slow downloads; 0 = sort immediately.\n'
+    printf '  Current: %s   %sRecommended: %ss%s\n' "$(fmt_grace "$cur")" "$DIM" "$RECOMMENDED_GRACE" "$R"
+    printf '  Seconds, %sr%s = recommended, blank = keep: ' "$BLD" "$R"
+    IFS= read -r input
+    printf '\033[?25l'
+    case "$input" in
+        "")        MSG="Grace period unchanged ($(fmt_grace "$cur"))" ;;
+        r|R)       set_grace "$RECOMMENDED_GRACE" && MSG="Grace period → $(fmt_grace "$RECOMMENDED_GRACE")" ;;
+        *[!0-9]*)  MSG="Invalid — digits only (seconds)" ;;
+        *)         if set_grace "$input"; then MSG="Grace period → $(fmt_grace "$input")"; else MSG="Unchanged (0–86400 seconds)"; fi ;;
     esac
 }
 
@@ -1058,7 +1111,8 @@ EOF
        dsort screenshotdate | metanames | autounzip | autoupdate   on|off
 
        dsort interval [secs|r]      archivedays [days|r]
-       dsort largefiles [GB|r]      exclude / only  [items|clear]
+       dsort graceperiod [secs|r]   largefiles [GB|r]
+       dsort exclude / only  [items|clear]
 
        dsort on | off           enable/disable the whole sorter
 EOF
@@ -1264,19 +1318,20 @@ activate() {
             0)  toggle_notify ;;
             1)  toggle_cleannames ;;
             2)  pick_interval ;;
-            3)  prompt_archivedays ;;
-            4)  toggle_aging ;;
-            5)  toggle_duplicates ;;
-            6)  pick_largefile ;;
-            7)  toggle_screenshotdate ;;
-            8)  toggle_metanames ;;
-            9)  toggle_autounzip ;;
-            10) toggle_autoupdate ;;
-            11) do_categories ;;
-            12) do_filter exclude ;;
-            13) do_filter only ;;
-            14) do_rules ;;
-            15) SCREEN=main; focus=6 ;;
+            3)  prompt_grace ;;
+            4)  prompt_archivedays ;;
+            5)  toggle_aging ;;
+            6)  toggle_duplicates ;;
+            7)  pick_largefile ;;
+            8)  toggle_screenshotdate ;;
+            9)  toggle_metanames ;;
+            10) toggle_autounzip ;;
+            11) toggle_autoupdate ;;
+            12) do_categories ;;
+            13) do_filter exclude ;;
+            14) do_filter only ;;
+            15) do_rules ;;
+            16) SCREEN=main; focus=6 ;;
         esac
     else
         case "$focus" in
@@ -1302,7 +1357,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=16 || NROWS=10
+        [ "$SCREEN" = settings ] && NROWS=17 || NROWS=10
         draw
         MSG=""
         key=$(read_key) || break
@@ -1415,6 +1470,15 @@ case "$1" in
             esac
         else
             echo "Archive age: $(get_archivedays) days (recommended $RECOMMENDED_ARCHIVE_DAYS)"
+        fi ;;
+    graceperiod|grace)
+        if [ -n "$2" ]; then
+            case "$2" in
+                r|recommended) set_grace "$RECOMMENDED_GRACE" && echo "Grace period: $(fmt_grace "$RECOMMENDED_GRACE")" ;;
+                *) if set_grace "$2"; then echo "Grace period: $(fmt_grace "$2") before a download is sorted"; else echo "Invalid (whole seconds, 0–86400; 0 = immediate)." >&2; exit 1; fi ;;
+            esac
+        else
+            echo "Grace period: $(fmt_grace "$(get_grace)") (recommended ${RECOMMENDED_GRACE}s)"
         fi ;;
     preview)
         run_preview ;;

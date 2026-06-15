@@ -118,6 +118,7 @@ dsort autounzip on|off
 
 # tunables (r = recommended)
 dsort interval [seconds|r]
+dsort graceperiod [seconds|r]   # how long a download settles before sorting (0 = immediate)
 dsort archivedays [days|r]
 dsort largefiles [GB|r]     # 0 = off
 

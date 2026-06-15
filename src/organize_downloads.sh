@@ -21,7 +21,15 @@
 # can `source` it to reuse classify()/move_to() without triggering a run.
 
 DIR="$HOME/Downloads"
-MIN_AGE=60           # seconds; skip files modified more recently (may still be downloading)
+# Grace period: skip files modified within the last MIN_AGE seconds (they may
+# still be downloading). Tunable via `dsort graceperiod N` (stored in GRACEFILE);
+# default 60. 0 = sort immediately.
+MIN_AGE=60
+GRACEFILE="$HOME/Library/Scripts/organize_downloads.graceperiod"
+if [ -r "$GRACEFILE" ]; then
+    _ga=$(tr -dc '0-9' < "$GRACEFILE" 2>/dev/null)
+    [ -n "$_ga" ] && [ "$_ga" -ge 0 ] 2>/dev/null && MIN_AGE=$_ga
+fi
 LOG="$HOME/Library/Logs/organize-downloads.log"
 # Opt-in filename cleanup: OFF unless this flag file exists (mirrors .nonotify).
 # Toggle with `downloads-sorter cleannames on|off`.
