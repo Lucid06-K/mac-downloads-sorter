@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.24"
+VERSION="1.0.25"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -726,7 +726,7 @@ _draw_body() {
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
-        printf '\n  %s\n' "${DIM}↑/↓ move · enter or 1-9,0 · esc back · q quit${R}"
+        printf '\n  %s\n' "${DIM}↑/↓ move · enter select · esc back · q quit${R}"
     else
         printf '\n  %s\n' "${BLD}Downloads Sorter${R}"
         printf '  %s\n' "$SEP"
@@ -1819,9 +1819,12 @@ ui_main() {
             up|k)   focus=$(( (focus + NROWS - 1) % NROWS )); continue ;;
             down|j) focus=$(( (focus + 1) % NROWS )); continue ;;
             "")     activate; continue ;;
-            [0-9])  # number shortcut: 1-9 -> rows 0-8, 0 -> row 9; jump + activate
-                    if [ "$key" = 0 ]; then idx=9; else idx=$((key - 1)); fi
-                    if [ "$idx" -lt "$NROWS" ]; then focus=$idx; activate; fi
+            [0-9])  # number shortcut: main menu only (Settings has too many rows
+                    # for 1-9,0 to be meaningful, so it uses arrows/enter only)
+                    if [ "$SCREEN" != settings ]; then
+                        if [ "$key" = 0 ]; then idx=9; else idx=$((key - 1)); fi
+                        if [ "$idx" -lt "$NROWS" ]; then focus=$idx; activate; fi
+                    fi
                     continue ;;
         esac
         # only navigation keys are screen-specific now
