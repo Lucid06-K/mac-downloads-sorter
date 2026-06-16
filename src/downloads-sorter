@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.25"
+VERSION="1.0.26"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -540,11 +540,19 @@ _rowkey() { if [ "$1" -lt 9 ]; then printf '%d' "$(( $1 + 1 ))"; elif [ "$1" -eq
 
 # row <index> <plain-label> <colored-label> — shows its number; reverse-video when focused
 row() {
-    local k; k=$(_rowkey "$1")
-    if [ "$1" -eq "$focus" ]; then
-        printf '  %s%s ▸ %-40s%s\n' "$REV" "$k" "$2" "$R"
+    if [ "$SCREEN" = settings ]; then
+        if [ "$1" -eq "$focus" ]; then
+            printf '  %s ▸ %-42s%s\n' "$REV" "$2" "$R"
+        else
+            printf '     %s\n' "$3"
+        fi
     else
-        printf '   %s  %s\n' "$k" "$3"
+        local k; k=$(_rowkey "$1")
+        if [ "$1" -eq "$focus" ]; then
+            printf '  %s%s ▸ %-40s%s\n' "$REV" "$k" "$2" "$R"
+        else
+            printf '   %s  %s\n' "$k" "$3"
+        fi
     fi
 }
 
