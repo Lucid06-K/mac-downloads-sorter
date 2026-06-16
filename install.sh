@@ -123,7 +123,7 @@ cat > "$PLIST" <<PLIST
     <key>RunAtLoad</key>
     <true/>
     <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <integer>2</integer>
     <key>ProcessType</key>
     <string>Background</string>
 </dict>

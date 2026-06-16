@@ -42,7 +42,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.21"
+VERSION="1.0.22"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -756,7 +756,11 @@ toggle_notify() {
 }
 toggle_detect() {
     if detect_is_on; then rm -f "$DETECT_FLAG"; MSG="Detected heads-up OFF"
-    else touch "$DETECT_FLAG"; MSG="Detected heads-up ON — banner when a download is spotted"; fi
+    else
+        touch "$DETECT_FLAG"
+        if [ "$(get_grace)" = 0 ]; then MSG="Detected heads-up ON — but grace is 0 (immediate), so set a grace period for it to fire"
+        else MSG="Detected heads-up ON — banner when a download is spotted"; fi
+    fi
 }
 # nested Notifications submenu: master on/off + the detected heads-up opt-in
 do_notifications() {
@@ -929,7 +933,8 @@ form_grace() {
         tot=$(( vals[0]*86400 + vals[1]*3600 + vals[2]*60 + vals[3] ))
         printf '\033[H\033[2J'
         printf '\n  %sGrace period%s  %s— how long a download settles before sorting%s\n' "$BLD" "$R" "$DIM" "$R"
-        printf '  %sType a number in each field; they add up. Default %ss.%s\n\n' "$DIM" "$RECOMMENDED_GRACE" "$R"
+        printf '  %sType a number in each field; they add up. Default %ss.%s\n' "$DIM" "$RECOMMENDED_GRACE" "$R"
+        printf '  %s0 = immediate (sorts on sight) — also turns off the "detected" heads-up.%s\n\n' "$DIM" "$R"
         for i in 0 1 2 3; do
             if [ "$i" -eq "$focus" ]; then printf '   %s ▸ %-8s [ %2s ] %s %s(0–%s)%s\n' "$REV" "${labels[$i]}" "${vals[$i]}" "$R" "$DIM" "${maxes[$i]}" "$R"
             else printf '     %-8s [ %2s ]   %s(0–%s)%s\n' "${labels[$i]}" "${vals[$i]}" "$DIM" "${maxes[$i]}" "$R"; fi
@@ -950,7 +955,11 @@ form_grace() {
                         vals[$focus]=$nv
                     fi ;;
             $'\177'|$'\b') [ "$focus" -lt 4 ] && vals[$focus]=$(( vals[focus] / 10 )) ;;
-            "")     set_grace "$tot" && MSG="Grace period → $(fmt_grace "$tot")" || MSG="Could not set grace period"; return ;;
+            "")     if set_grace "$tot"; then
+                        if [ "$tot" -eq 0 ] && detect_is_on; then rm -f "$DETECT_FLAG"; MSG="Grace → immediate · detected heads-up turned off"
+                        else MSG="Grace period → $(fmt_grace "$tot")"; fi
+                    else MSG="Could not set grace period"; fi
+                    return ;;
         esac
     done
 }
@@ -1812,7 +1821,10 @@ case "$1" in
         if [ -n "$2" ]; then
             case "$2" in
                 r|recommended|d|default) set_grace "$RECOMMENDED_GRACE" && echo "Grace period: $(fmt_grace "$RECOMMENDED_GRACE")" ;;
-                *) if set_grace "$2"; then echo "Grace period: $(fmt_grace "$2") before a download is sorted"; else echo "Invalid (whole seconds, 0–2764799 / max 31 days; 0 = immediate)." >&2; exit 1; fi ;;
+                *) if set_grace "$2"; then
+                       if [ "$((10#$2))" -eq 0 ]; then rm -f "$DETECT_FLAG"; echo "Grace period: immediate (detected heads-up turned off)"
+                       else echo "Grace period: $(fmt_grace "$2") before a download is sorted"; fi
+                   else echo "Invalid (whole seconds, 0–2764799 / max 31 days; 0 = immediate)." >&2; exit 1; fi ;;
             esac
         else
             echo "Grace period: $(fmt_grace "$(get_grace)") (default ${RECOMMENDED_GRACE}s)"

@@ -61,7 +61,7 @@ NONOTIFY_FLAG="$HOME/Library/Scripts/organize_downloads.nonotify"
 # flag exists AND notifications aren't globally muted. ANNOUNCED de-dups repeats.
 DETECT_FLAG="$HOME/Library/Scripts/organize_downloads.detectnotify"
 ANNOUNCED="$HOME/Library/Scripts/.organize_downloads.announced"
-detect_notif_on() { [ -e "$DETECT_FLAG" ] && [ ! -e "$NONOTIFY_FLAG" ]; }
+detect_notif_on() { [ -e "$DETECT_FLAG" ] && [ ! -e "$NONOTIFY_FLAG" ] && [ "$MIN_AGE" -gt 0 ]; }
 # compact seconds label for the heads-up ("45s", "2m", "1m 30s")
 fmt_secs() {
     local s="$1"; [ "$s" -lt 1 ] && s=1
