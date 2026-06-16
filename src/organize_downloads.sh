@@ -98,6 +98,17 @@ DIGEST_STAMP="$HOME/Library/Scripts/.organize_downloads.digest_last"
 # the folders that exist after a run that did work. Opt-in via the menu.
 COLORS_FILE="$HOME/Library/Scripts/organize_downloads.foldercolors"
 
+# Empty-folder cleanup scope (stored in PRUNE_SCOPE_FILE; default "managed"):
+#   managed — only the sorter's own empty category folders (safe default)
+#   user    — also empty folders YOU created (anything outside the categories)
+#   all     — every empty folder anywhere in ~/Downloads
+# Hidden folders (.*) and Syncthing markers are ALWAYS protected. For user/all,
+# PRUNE_KEEP = blacklist (never remove) and PRUNE_ONLY = whitelist (if non-empty,
+# only folders matching these). Entries are a folder name or relative path.
+PRUNE_SCOPE_FILE="$HOME/Library/Scripts/organize_downloads.prunescope"
+PRUNE_KEEP="$HOME/Library/Scripts/organize_downloads.prunekeep"
+PRUNE_ONLY="$HOME/Library/Scripts/organize_downloads.pruneonly"
+
 # duplicate detection: a byte-identical name-collision goes to Duplicates/ instead
 # of "name (2)" so you can bulk-review. ON unless the flag exists.
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
@@ -609,27 +620,68 @@ preview() {
 # prune_empty — keep the tree tidy as files move/age out. Conservative scope:
 # every empty dir under Archive/ (sorter fully owns it) plus the sorter's OWN
 # empty sub-buckets in the live tree. Never the category roots, never your folders.
+# is <dir> free of real content? (empty, or only disposable junk: a Finder
+# .DS_Store or an orphaned "~$…" Office lock — Finder hides these, so the folder
+# LOOKS empty). A real file makes it non-disposable (a ~$ lock next to its actual
+# document is therefore kept, never deleted).
+_dir_disposable() {
+    ! find "$1" -mindepth 1 -maxdepth 1 \( -type d -o \( -type f ! -name '.DS_Store' ! -name '~$*' \) \) 2>/dev/null | grep -q .
+}
+# remove the disposable junk in <dir>, then the now-empty dir (rmdir is safe: it
+# only succeeds on a truly-empty directory).
+_purge_and_rmdir() {
+    find "$1" -maxdepth 1 -type f \( -name '.DS_Store' -o -name '~$*' \) -delete 2>/dev/null
+    rmdir "$1" 2>/dev/null
+}
+# does <rel> (path relative to DIR) match any entry in the list args? An entry
+# matches by exact basename, exact relative path, or as an ancestor path.
+_name_in_list() {
+    local rel="$1" base; base="${rel##*/}"; shift
+    local e
+    for e in "$@"; do
+        [ "$base" = "$e" ] && return 0
+        case "$rel" in "$e"|"$e"/*) return 0 ;; esac
+    done
+    return 1
+}
+
 prune_empty() {
-    # Tidy empty managed folders. A folder counts as removable when nothing but
-    # disposable junk is left in it — a Finder .DS_Store, or an orphaned "~$…"
-    # Office lock file (the document it guarded is gone; Finder hides these, so
-    # the folder LOOKS empty). That junk is removed so the folder can go; a real
-    # file is NEVER deleted — a ~$ lock sitting next to its actual document is
-    # kept. Processes deepest-first so parents collapse once their children are
-    # cleared. Only ever touches the sorter's own managed folders.
-    local base d
+    # 1) ALWAYS tidy the sorter's own empty category folders (junk-aware),
+    #    deepest-first so nested parents (e.g. Archive/Documents/Word & Text)
+    #    collapse once their children clear.
+    local base d rel
     for base in Archive "${MANAGED_DIRS[@]}" "Duplicates" "Large Files"; do
         [ -d "$DIR/$base" ] || continue
         find "$DIR/$base" -depth -type d 2>/dev/null | while IFS= read -r d; do
-            # keep the folder if it holds any subfolder or any real (non-junk) file
-            if find "$d" -mindepth 1 -maxdepth 1 \( -type d -o \( -type f ! -name '.DS_Store' ! -name '~$*' \) \) 2>/dev/null | grep -q .; then
-                continue
-            fi
-            # only junk (or nothing) remains → drop the junk, then the empty folder
-            find "$d" -maxdepth 1 -type f \( -name '.DS_Store' -o -name '~$*' \) -delete 2>/dev/null
-            rmdir "$d" 2>/dev/null
+            _dir_disposable "$d" && _purge_and_rmdir "$d"
         done
     done
+
+    # 2) Extend per the configured scope. "managed" (default) stops here. "user"
+    #    also removes empty folders you created; "all" removes every empty folder.
+    #    Hidden folders (.*) — covering Syncthing's .stfolder — are always
+    #    protected, as is the blacklist; a non-empty whitelist narrows to matches.
+    local scope=managed top
+    [ -r "$PRUNE_SCOPE_FILE" ] && scope=$(tr -dc 'a-z' < "$PRUNE_SCOPE_FILE" 2>/dev/null)
+    case "$scope" in user|all) ;; *) return 0 ;; esac
+    local keep=() only=()
+    while IFS= read -r _e; do keep+=("$_e"); done < <(_read_list "$PRUNE_KEEP")
+    while IFS= read -r _e; do only+=("$_e"); done < <(_read_list "$PRUNE_ONLY")
+    find "$DIR" -depth -mindepth 1 -type d 2>/dev/null | while IFS= read -r d; do
+        rel="${d#"$DIR"/}"
+        case "/$rel/" in */.*/*) continue ;; esac             # any hidden path component
+        top="${rel%%/*}"
+        [ "$scope" = user ] && _is_managed_top "$top" && continue   # user: skip sorter folders
+        [ ${#keep[@]} -gt 0 ] && _name_in_list "$rel" "${keep[@]}" && continue
+        [ ${#only[@]} -gt 0 ] && { _name_in_list "$rel" "${only[@]}" || continue; }
+        _dir_disposable "$d" && _purge_and_rmdir "$d"
+    done
+}
+# is <name> one of the sorter's own top-level category folders?
+_is_managed_top() {
+    local n="$1" m
+    for m in Archive Duplicates "Large Files" "${MANAGED_DIRS[@]}"; do [ "$n" = "$m" ] && return 0; done
+    return 1
 }
 
 # aging_notice — at most weekly, nudge if Archive holds files older than a year.

@@ -105,6 +105,7 @@ dsort undo            # revert the last run (repeat to keep stepping back)
 dsort find <name>     # "where did it go?" — locate a download in your sorted folders
 dsort stats           # counts + sizes per category
 dsort colours [..]    # Finder colour tags for category folders (list / set / clear)
+dsort cleanfolders [..]  # empty-folder cleanup scope: managed | user | all (+ keep/only lists)
 dsort rules           # list your custom rules
 dsort log [n]         # recent activity
 
@@ -183,6 +184,26 @@ dsort colours clear                    # clear all
 
 Colours are the standard Finder set (Red, Orange, Yellow, Green, Blue, Purple, Gray). It uses the normal Finder tag metadata, so no extra permissions are needed.
 
+### Empty‑folder cleanup
+
+The sorter’s own empty category folders are **always** tidied (including ones that only *look* empty because of a hidden `.DS_Store` or an orphaned `~$…` Office lock). You can widen this in **Settings → Empty‑folder cleanup**, which has a **scope**:
+
+- **Category folders only** *(default)* — just this app’s folders.
+- **Also folders you created** — empty folders anywhere in `~/Downloads`, except the sorter’s.
+- **Every folder** — any empty folder in `~/Downloads`.
+
+Hidden folders (`.*`, which covers Syncthing’s `.stfolder`) are **always protected**. For the wider scopes you can add a **blacklist** (never delete these) and a **whitelist** (if set, only delete matching folders). From the command line:
+
+```sh
+dsort cleanfolders              # show scope + list counts
+dsort cleanfolders user         # set scope: managed | user | all
+dsort cleanfolders keep Temp node_modules   # never delete these (blacklist)
+dsort cleanfolders only Builds  # if set, only delete matching folders (whitelist)
+dsort cleanfolders keepclear    # clear the blacklist  (onlyclear for whitelist)
+```
+
+A folder is only removed when it’s genuinely empty (or holds nothing but that disposable junk) — a real file is never deleted.
+
 ### Limit what gets sorted
 
 Two multi‑select checklists in **Settings** let you control scope — tick categories and/or type in file extensions:
@@ -205,7 +226,7 @@ Entries are either a **category** (`Media`, `Documents/PDFs`, …) or a bare **f
 
 ## Safety
 
-- **Never deletes your files.** Moves use a no‑clobber strategy and add ` (2)` on a name clash. The *only* things it removes are empty managed category folders and the disposable junk left inside them — a Finder `.DS_Store`, or an orphaned `~$…` Office lock file (the document it guarded is gone) — so a category folder that *looks* empty in Finder doesn't linger. A real file is never touched (a `~$` lock sitting next to its actual document is kept).
+- **Never deletes your files.** Moves use a no‑clobber strategy and add ` (2)` on a name clash. The *only* things it removes are **empty folders** (and the disposable junk left inside them — a Finder `.DS_Store`, or an orphaned `~$…` Office lock file — so a folder that *looks* empty in Finder doesn't linger). By default that's limited to the sorter's own category folders; you can widen it (and guard it with a whitelist/blacklist) under **Empty‑folder cleanup**. A real file is never touched (a `~$` lock sitting next to its actual document is kept).
 - **Everything is logged** to `~/Library/Logs/organize-downloads.log`.
 - **Leaves cloud "online-only" files alone.** Files whose contents live in the cloud (iCloud "Optimize Mac Storage", or Dropbox/OneDrive/Google Drive online-only placeholders) are skipped, so sorting never silently forces a multi‑GB download. They sort normally once you've downloaded them.
 - **Undo** keeps a history stack: revert individual changes, or whole runs, and keep stepping back run‑by‑run (`dsort undo`, repeatable; or pick items in the menu's Undo screen).

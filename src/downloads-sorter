@@ -29,6 +29,9 @@ RECENTFILE="$HOME/Library/Scripts/organize_downloads.recentcount"
 AGING_FLAG="$HOME/Library/Scripts/organize_downloads.noaging"
 DIGEST_FLAG="$HOME/Library/Scripts/organize_downloads.digest"
 COLORS_FILE="$HOME/Library/Scripts/organize_downloads.foldercolors"
+PRUNE_SCOPE_FILE="$HOME/Library/Scripts/organize_downloads.prunescope"
+PRUNE_KEEP="$HOME/Library/Scripts/organize_downloads.prunekeep"
+PRUNE_ONLY="$HOME/Library/Scripts/organize_downloads.pruneonly"
 DEDUP_FLAG="$HOME/Library/Scripts/organize_downloads.noduplicates"
 LFFILE="$HOME/Library/Scripts/organize_downloads.largefilegb"
 SS_FLAG="$HOME/Library/Scripts/organize_downloads.noscreenshotdate"
@@ -42,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.23"
+VERSION="1.0.24"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
@@ -56,6 +59,10 @@ R=$'\033[0m'; REV=$'\033[7m'; DIM=$'\033[2m'; GRN=$'\033[32m'; BLD=$'\033[1m'; Y
 is_loaded()    { launchctl print "$TARGET" >/dev/null 2>&1; }
 notify_is_on() { [ ! -e "$NONOTIFY_FLAG" ]; }
 detect_is_on() { [ -e "$DETECT_FLAG" ]; }   # heads-up when a download is detected (opt-in)
+get_prune_scope() { local v=managed; [ -r "$PRUNE_SCOPE_FILE" ] && v=$(tr -dc 'a-z' < "$PRUNE_SCOPE_FILE" 2>/dev/null); case "$v" in user|all) echo "$v" ;; *) echo managed ;; esac; }
+set_prune_scope() { case "$1" in managed|user|all) printf '%s\n' "$1" > "$PRUNE_SCOPE_FILE" ;; *) return 1 ;; esac; }
+prunekeep_count() { local n=0; [ -r "$PRUNE_KEEP" ] && n=$(grep -cvE '^[[:space:]]*(#|$)' "$PRUNE_KEEP" 2>/dev/null); echo "${n:-0}"; }
+pruneonly_count() { local n=0; [ -r "$PRUNE_ONLY" ] && n=$(grep -cvE '^[[:space:]]*(#|$)' "$PRUNE_ONLY" 2>/dev/null); echo "${n:-0}"; }
 clean_is_on()  { [ -e "$CLEANFLAG" ]; }
 aging_is_on()  { [ ! -e "$AGING_FLAG" ]; }   # weekly Archive nudge, default ON
 digest_is_on() { [ -e "$DIGEST_FLAG" ]; }    # weekly activity digest, opt-in (default OFF)
@@ -491,6 +498,7 @@ show_status() {
         echo "Custom rules: $(grep -vE '^[[:space:]]*#' "$HOME/.downloads-rules.conf" | grep -cE '\->|→') active (dsort rules)"
     else echo "Custom rules: none (~/.downloads-rules.conf)"; fi
     echo "Folder colours: $(colors_count) set (dsort colours)"
+    echo "Empty-folder cleanup: scope $(get_prune_scope) (blacklist $(prunekeep_count), whitelist $(pruneonly_count))"
     ex=$(filter_count exclude); on=$(filter_count only)
     if [ "$on" -gt 0 ]; then echo "Sorting filter: ONLY sorting $on selected type(s) (+ $ex excluded)"
     elif [ "$ex" -gt 0 ]; then echo "Sorting filter: excluding $ex type(s)"
@@ -576,7 +584,8 @@ describe_settings() {
         16) echo "Pick categories/file types to sort EXCLUSIVELY — everything else is left alone." ;;
         17) echo "Add/remove your own 'pattern → folder' rules (they override the built-ins)." ;;
         18) echo "Give category folders a Finder colour tag — re-applied automatically." ;;
-        19) echo "Return to the main menu." ;;
+        19) echo "Also remove empty folders you created (opt-in; with whitelist/blacklist)." ;;
+        20) echo "Return to the main menu." ;;
     esac
 }
 
@@ -711,8 +720,9 @@ _draw_body() {
         row 16 "Only sort these ▸"      "Only sort these ▸  ${DIM}($(filter_count only))${R}"
         row 17 "Custom sorting rules ▸" "Custom sorting rules ▸  ${DIM}($(rules_count))${R}"
         row 18 "Folder colours ▸"       "Folder colours ▸  ${DIM}($(colors_count))${R}"
+        row 19 "Empty-folder cleanup ▸" "Empty-folder cleanup ▸  ${DIM}($(get_prune_scope))${R}"
         printf '  %s\n' "$SEP"
-        row 19 "← Back to menu" "← Back to menu"
+        row 20 "← Back to menu" "← Back to menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_settings "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -1308,6 +1318,7 @@ EOF
        dsort stats              counts / sizes per category
        dsort rules              list custom rules
        dsort colours [..]       Finder colour tags for category folders
+       dsort cleanfolders [..]  empty-folder cleanup scope (managed|user|all)
        dsort log [n]            recent activity
 
        dsort notify | detect | cleannames | aging | duplicates   on|off
@@ -1643,6 +1654,114 @@ do_colors() {
     printf '\033[?25l'; MSG="Folder colours updated"
 }
 
+# --- Empty-folder cleanup (optional, removes OTHER empty folders too) -------
+# simple add/remove editor for a folder-name list file (blacklist / whitelist)
+_prune_list_edit() {
+    local file="$1" title="$2" hint="$3" items focus=0 key i n nrows input frame
+    printf '\033[?25l'
+    while :; do
+        items=(); while IFS= read -r i; do items+=("$i"); done < <(grep -vE '^[[:space:]]*(#|$)' "$file" 2>/dev/null)
+        n=${#items[@]}; nrows=$((n+2)); [ "$focus" -ge "$nrows" ] && focus=$((nrows-1))
+        frame=$(
+            printf '\n  %s%s%s\n' "$BLD" "$title" "$R"
+            printf '  %s%s%s\n' "$DIM" "$hint" "$R"
+            printf '  %s──────────────────────────────────────────────%s\n' "$DIM" "$R"
+            [ "$n" -eq 0 ] && printf '     %s(none yet)%s\n' "$DIM" "$R"
+            for i in "${!items[@]}"; do
+                if [ "$i" -eq "$focus" ]; then printf '  %s ▸ %-32s%s  enter=remove\n' "$REV" "${items[$i]}" "$R"
+                else printf '     %s\n' "${items[$i]}"; fi
+            done
+            printf '  %s──────────────────────────────────────────────%s\n' "$DIM" "$R"
+            if [ "$focus" -eq "$n" ]; then printf '  %s ▸ + Add a folder name%s\n' "$REV" "$R"; else printf '     + Add a folder name\n'; fi
+            if [ "$focus" -eq $((n+1)) ]; then printf '  %s ▸ ← Back%s\n' "$REV" "$R"; else printf '     ← Back\n'; fi
+            printf '\n  %s↑/↓ move · enter remove/add · esc back%s\n' "$DIM" "$R"
+        )
+        _paint "$frame"
+        key=$(read_key)
+        case "$key" in
+            up|k)   focus=$(( (focus + nrows - 1) % nrows )) ;;
+            down|j) focus=$(( (focus + 1) % nrows )) ;;
+            esc|q)  break ;;
+            "")     if [ "$focus" -lt "$n" ]; then
+                        grep -vxF -- "${items[$focus]}" "$file" 2>/dev/null > "$file.tmp"; mv "$file.tmp" "$file" 2>/dev/null; focus=0
+                    elif [ "$focus" -eq "$n" ]; then
+                        printf '\033[?25h'; printf '\n  Folder name (or relative path, e.g. Projects/Active): '; IFS= read -r input; printf '\033[?25l'
+                        input=$(printf '%s' "$input" | sed 's#^[[:space:]/]*##; s#[[:space:]/]*$##')
+                        [ -n "$input" ] && printf '%s\n' "$input" >> "$file"; focus=0
+                    else break; fi ;;
+        esac
+    done
+    printf '\033[?25l'
+}
+# pick the 3-way cleanup scope
+_prune_scope_pick() {
+    local cur f=0 i k
+    local names=(managed user all)
+    local labels=("Category folders only (this app's)" "Also folders you created" "Every empty folder")
+    cur=$(get_prune_scope); for i in 0 1 2; do [ "${names[$i]}" = "$cur" ] && f="$i"; done
+    while :; do
+        printf '\033[H'
+        printf '\n  %sEmpty-folder cleanup — scope%s\n\n' "$BLD" "$R"
+        for i in 0 1 2; do
+            if [ "$i" -eq "$f" ]; then printf '   %s ▸ %-34s%s%s\n\033[K' "$REV" "${labels[$i]}" "$R" "$([ "${names[$i]}" = "$cur" ] && printf ' %s· current%s' "$GRN" "$R")"
+            else printf '     %-34s%s\n\033[K' "${labels[$i]}" "$([ "${names[$i]}" = "$cur" ] && printf ' %s· current%s' "$GRN" "$R")"; fi
+        done
+        printf '\n  %sCategory folders are always tidied. Hidden + Syncthing folders are always safe.%s\n\033[K' "$DIM" "$R"
+        printf '  %s↑/↓ move · enter set · esc cancel%s\n\033[K\033[J' "$DIM" "$R"
+        k=$(read_key)
+        case "$k" in
+            up|k)   f=$(( (f+2)%3 )) ;;
+            down|j) f=$(( (f+1)%3 )) ;;
+            esc|q)  return ;;
+            "")     set_prune_scope "${names[$f]}"; MSG="Cleanup scope -> ${labels[$f]}"; return ;;
+        esac
+    done
+}
+# Empty-folder cleanup submenu: scope + blacklist + whitelist
+do_emptyfolders() {
+    local focus=0 key frame desc kc oc sc sclabel
+    printf '\033[?25l'
+    while :; do
+        kc=$(prunekeep_count); oc=$(pruneonly_count); sc=$(get_prune_scope)
+        case "$sc" in managed) sclabel="category only" ;; user) sclabel="+ your folders" ;; all) sclabel="every folder" ;; esac
+        case "$focus" in
+            0) desc="How far cleanup reaches: this app's category folders only, also your folders, or every folder." ;;
+            1) desc="Folders to NEVER delete (name or relative path). Hidden + Syncthing folders are always safe." ;;
+            2) desc="If set, ONLY delete empty folders matching these — everything else is kept." ;;
+            *) desc="Return to Settings." ;;
+        esac
+        frame=$(
+            printf '\n  %sEmpty-folder cleanup%s\n' "$BLD" "$R"
+            printf '  %s──────────────────────────────────────────────%s\n' "$DIM" "$R"
+            if [ "$focus" -eq 0 ]; then printf '  %s ▸ %-28s%s %s%s%s\n' "$REV" "Scope" "$R" "$GRN" "$sclabel" "$R"
+            else printf '     %-28s %s%s%s\n' "Scope" "$GRN" "$sclabel" "$R"; fi
+            if [ "$focus" -eq 1 ]; then printf '  %s ▸ %-28s%s %s(%s)%s\n' "$REV" "Never delete (blacklist) ▸" "$R" "$DIM" "$kc" "$R"
+            else printf '     %-28s %s(%s)%s\n' "Never delete (blacklist) ▸" "$DIM" "$kc" "$R"; fi
+            if [ "$focus" -eq 2 ]; then printf '  %s ▸ %-28s%s %s(%s)%s\n' "$REV" "Only these (whitelist) ▸" "$R" "$DIM" "$oc" "$R"
+            else printf '     %-28s %s(%s)%s\n' "Only these (whitelist) ▸" "$DIM" "$oc" "$R"; fi
+            printf '  %s──────────────────────────────────────────────%s\n' "$DIM" "$R"
+            if [ "$focus" -eq 3 ]; then printf '  %s ▸ ← Back%s\n' "$REV" "$R"; else printf '     ← Back\n'; fi
+            printf '\n  %s➜ %s%s\n' "$DIM" "$desc" "$R"
+            printf '  %s\n' "${GRN}${MSG}${R}"
+            printf '  %s↑/↓ move · enter select · esc back%s\n' "$DIM" "$R"
+        )
+        _paint "$frame"
+        key=$(read_key)
+        case "$key" in
+            up|k)   focus=$(( (focus + 3) % 4 )) ;;
+            down|j) focus=$(( (focus + 1) % 4 )) ;;
+            esc|q)  break ;;
+            "")     case "$focus" in
+                        0) _prune_scope_pick; printf '\033[?25l' ;;
+                        1) _prune_list_edit "$PRUNE_KEEP" "Never delete (blacklist)" "Empty folders matching these are always kept." ; MSG="Blacklist updated" ;;
+                        2) _prune_list_edit "$PRUNE_ONLY" "Only delete these (whitelist)" "If non-empty, only empty folders matching these are removed." ; MSG="Whitelist updated" ;;
+                        3) break ;;
+                    esac ;;
+        esac
+    done
+    printf '\033[?25l'; MSG="Empty-folder cleanup updated"
+}
+
 activate() {
     if [ "$SCREEN" = settings ]; then
         case "$focus" in
@@ -1665,7 +1784,8 @@ activate() {
             16) do_filter only ;;
             17) do_rules ;;
             18) do_colors ;;
-            19) SCREEN=main; focus=6 ;;
+            19) do_emptyfolders ;;
+            20) SCREEN=main; focus=6 ;;
         esac
     else
         case "$focus" in
@@ -1691,7 +1811,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=20 || NROWS=10
+        [ "$SCREEN" = settings ] && NROWS=21 || NROWS=10
         draw
         MSG=""
         key=$(read_key) || break
@@ -1858,6 +1978,18 @@ case "$1" in
             if [ -s "$COLORS_FILE" ]; then echo "Folder colours:"; sed 's/|/ → /' "$COLORS_FILE" 2>/dev/null | sed 's/^/  /'
             else echo "No folder colours set yet (dsort → Settings → Folder colours)."; fi
         else echo 'usage: dsort colours ["<Category>" <Colour>|clear]' >&2; exit 1; fi ;;
+    cleanfolders|emptyfolders)
+        case "$2" in
+            managed|user|all) set_prune_scope "$2" && echo "Empty-folder cleanup scope: $2" ;;
+            keep)  shift 2; if [ -n "$1" ]; then for a in "$@"; do printf '%s\n' "$a" >> "$PRUNE_KEEP"; done; echo "Blacklist += $*"
+                   elif [ -s "$PRUNE_KEEP" ]; then echo "Never-delete (blacklist):"; grep -vE '^[[:space:]]*(#|$)' "$PRUNE_KEEP" | sed 's/^/  /'; else echo "Blacklist empty."; fi ;;
+            keepclear) : > "$PRUNE_KEEP"; echo "Blacklist cleared." ;;
+            only)  shift 2; if [ -n "$1" ]; then for a in "$@"; do printf '%s\n' "$a" >> "$PRUNE_ONLY"; done; echo "Whitelist += $*"
+                   elif [ -s "$PRUNE_ONLY" ]; then echo "Only-delete (whitelist):"; grep -vE '^[[:space:]]*(#|$)' "$PRUNE_ONLY" | sed 's/^/  /'; else echo "Whitelist empty (all eligible)."; fi ;;
+            onlyclear) : > "$PRUNE_ONLY"; echo "Whitelist cleared." ;;
+            ""|status) echo "Empty-folder cleanup scope: $(get_prune_scope)  (blacklist $(prunekeep_count), whitelist $(pruneonly_count))" ;;
+            *) echo 'usage: dsort cleanfolders [managed|user|all | keep [name…]|keepclear | only [name…]|onlyclear]' >&2; exit 1 ;;
+        esac ;;
     exclude|only)
         kind="$1"; [ "$kind" = only ] && ff="$ONLY_FILE" || ff="$EXCLUDE_FILE"
         case "${2:-}" in
@@ -1908,6 +2040,7 @@ Usage: dsort <command>   (bare = interactive UI)
   recentcount [0-10|d]  recent moves listed under the menu (0 = hide)
   find <name>         where a download got filed
   colours [args]      Finder colour tags on category folders (bare = list)
+  cleanfolders [..]   empty-folder cleanup: managed|user|all, keep/only lists
   version             print the installed version
   update              download + install the latest version from GitHub
 USAGE
