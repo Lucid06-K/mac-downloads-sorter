@@ -45,13 +45,13 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.26"
+VERSION="1.0.27"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
-RECOMMENDED_INTERVAL=3600       # hourly — WatchPaths does the real work; this is just a backup
-RECOMMENDED_ARCHIVE_DAYS=30     # sweep files older than this into Archive/
+RECOMMENDED_INTERVAL=43200      # 12h — WatchPaths does the real work; this is just a backup
+RECOMMENDED_ARCHIVE_DAYS=15     # sweep files older than this into Archive/
 RECOMMENDED_LARGEFILE_GB=5      # files >= this go to Large Files/ for review
-RECOMMENDED_GRACE=60            # seconds to let a download settle before sorting
+RECOMMENDED_GRACE=300           # seconds (5 min) to let a download settle before sorting
 RECOMMENDED_RECENT=3            # lines of recent activity shown under the main menu
 
 R=$'\033[0m'; REV=$'\033[7m'; DIM=$'\033[2m'; GRN=$'\033[32m'; BLD=$'\033[1m'; YEL=$'\033[33m'
@@ -632,32 +632,17 @@ _draw_body() {
         c_plain="Filename cleanup   ○ OFF"; c_col="Filename cleanup   ${DIM}○ OFF${R}"
     fi
     i_plain="Auto-run interval  every $ivf"
-    if [ "$iv" = "$RECOMMENDED_INTERVAL" ]; then
-        i_col="Auto-run interval  ${GRN}every $ivf${R} ${DIM}(default)${R}"
-    else
-        i_col="Auto-run interval  ${YEL}every $ivf${R} ${DIM}(default $(fmt_interval "$RECOMMENDED_INTERVAL"))${R}"
-    fi
+    i_col="Auto-run interval  ${GRN}every $ivf${R}"
     a_plain="Archive age        $ad days"
-    if [ "$ad" = "$RECOMMENDED_ARCHIVE_DAYS" ]; then
-        a_col="Archive age        ${GRN}$ad days${R} ${DIM}(default)${R}"
-    else
-        a_col="Archive age        ${YEL}$ad days${R} ${DIM}(default $RECOMMENDED_ARCHIVE_DAYS)${R}"
-    fi
+    a_col="Archive age        ${GRN}$ad days${R}"
     gp_plain="Grace period       $gpf"
-    if [ "$gp" = "$RECOMMENDED_GRACE" ]; then
-        gp_col="Grace period       ${GRN}$gpf${R} ${DIM}(default)${R}"
-    else
-        gp_col="Grace period       ${YEL}$gpf${R} ${DIM}(default ${RECOMMENDED_GRACE}s)${R}"
-    fi
+    gp_col="Grace period       ${GRN}$gpf${R}"
     if [ "$rc" = 0 ]; then
         rc_plain="Recent activity    hidden"
-        rc_col="Recent activity    ${DIM}hidden${R} ${DIM}(default $RECOMMENDED_RECENT)${R}"
-    elif [ "$rc" = "$RECOMMENDED_RECENT" ]; then
-        rc_plain="Recent activity    $rc lines"
-        rc_col="Recent activity    ${GRN}$rc lines${R} ${DIM}(default)${R}"
+        rc_col="Recent activity    ${DIM}hidden${R}"
     else
         rc_plain="Recent activity    $rc lines"
-        rc_col="Recent activity    ${YEL}$rc lines${R} ${DIM}(default $RECOMMENDED_RECENT)${R}"
+        rc_col="Recent activity    ${GRN}$rc lines${R}"
     fi
     local g_plain g_col d_plain d_col lf lf_plain lf_col ss_plain ss_col mt_plain mt_col au_plain au_col uu_plain uu_col
     if aging_is_on; then
@@ -673,13 +658,10 @@ _draw_body() {
     lf=$(get_largefile)
     if [ "$lf" = 0 ]; then
         lf_plain="Big files          off"
-        lf_col="Big files          ${DIM}off${R} ${DIM}(default ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
-    elif [ "$lf" = "$RECOMMENDED_LARGEFILE_GB" ]; then
-        lf_plain="Big files          ≥ $lf GB"
-        lf_col="Big files          ${GRN}≥ $lf GB${R} ${DIM}(default)${R}"
+        lf_col="Big files          ${DIM}off${R}"
     else
         lf_plain="Big files          ≥ $lf GB"
-        lf_col="Big files          ${YEL}≥ $lf GB${R} ${DIM}(default ${RECOMMENDED_LARGEFILE_GB} GB)${R}"
+        lf_col="Big files          ${GRN}≥ $lf GB${R}"
     fi
     if ss_is_on; then
         ss_plain="Screenshot dating  ● ON";  ss_col="Screenshot dating  ${GRN}● ON${R}"
@@ -1174,7 +1156,7 @@ EOF
 
    •  Archive
          files older than the archive age move into Archive/, keeping the
-         same folder layout (default 30 days)
+         same folder layout (default 15 days)
 
    •  Duplicate routing
          byte-identical files (same size + checksum) go to Duplicates/
@@ -1206,11 +1188,11 @@ EOF
 
   Values (arrow-key pickers):
 
-       Auto-run interval    how often the safety-net timer fires (default 1h).
+       Auto-run interval    how often the safety-net timer fires (default 12h).
                             Real-time watching is always on, so downloads
                             still sort instantly regardless of this.
 
-       Archive age          move-to-Archive threshold in days (default 30)
+       Archive age          move-to-Archive threshold in days (default 15)
 
        Big files            size that sends a file to Large Files/ (default 5 GB)
 

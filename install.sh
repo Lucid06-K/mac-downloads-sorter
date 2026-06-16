@@ -119,7 +119,7 @@ cat > "$PLIST" <<PLIST
         <string>$HOME/Downloads</string>
     </array>
     <key>StartInterval</key>
-    <integer>3600</integer>
+    <integer>43200</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>ThrottleInterval</key>

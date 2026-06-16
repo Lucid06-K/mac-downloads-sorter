@@ -23,8 +23,8 @@
 DIR="$HOME/Downloads"
 # Grace period: skip files modified within the last MIN_AGE seconds (they may
 # still be downloading). Tunable via `dsort graceperiod N` (stored in GRACEFILE);
-# default 60. 0 = sort immediately.
-MIN_AGE=60
+# default 300 (5 min). 0 = sort immediately.
+MIN_AGE=300
 GRACEFILE="$HOME/Library/Scripts/organize_downloads.graceperiod"
 if [ -r "$GRACEFILE" ]; then
     _ga=$(tr -dc '0-9' < "$GRACEFILE" 2>/dev/null)
@@ -36,8 +36,8 @@ LOG="$HOME/Library/Logs/organize-downloads.log"
 CLEANFLAG="$HOME/Library/Scripts/organize_downloads.cleannames"
 
 # Files older than ARCHIVE_DAYS (by modified date) are swept into Archive/.
-# Tunable via `downloads-sorter archivedays N` (stored in AGEFILE); default 30.
-ARCHIVE_DAYS=30
+# Tunable via `downloads-sorter archivedays N` (stored in AGEFILE); default 15.
+ARCHIVE_DAYS=15
 AGEFILE="$HOME/Library/Scripts/organize_downloads.archivedays"
 if [ -r "$AGEFILE" ]; then
     _ad=$(tr -dc '0-9' < "$AGEFILE" 2>/dev/null)
