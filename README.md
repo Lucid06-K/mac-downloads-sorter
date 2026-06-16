@@ -46,7 +46,9 @@ cd mac-downloads-sorter
 bash install.sh
 ```
 
-That's it — the installer copies two small scripts into `~/Library/Scripts`, builds two tiny helper apps, starts the sorter in the background, and adds the **`dsort`** command. Restart your shell (or open a new tab) to use `dsort`.
+That's it — the installer copies two small scripts into `~/Library/Scripts`, builds two tiny helper apps, starts the sorter in the background, and adds the **`dsort`** command.
+
+> ⚠️ **Restart your shell (or open a new terminal tab) before using `dsort`** — the command won't be available until the shell reloads.
 
 ### Already cloned it before?
 
