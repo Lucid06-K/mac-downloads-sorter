@@ -48,7 +48,22 @@ bash install.sh
 
 That's it — the installer copies two small scripts into `~/Library/Scripts`, builds two tiny helper apps, starts the sorter in the background, and adds the **`dsort`** command. Restart your shell (or open a new tab) to use `dsort`.
 
-> **Already cloned it before?** `cd` into the folder and `git pull` first (or delete and re‑clone). `bash install.sh` works even if the script isn't marked executable.
+### Already cloned it before?
+
+If you cloned the repo on a previous attempt, `git clone` will fail with *"destination path already exists."* You don't need to re‑clone — just pull the latest code and re‑run the installer **from inside the existing folder**:
+
+```sh
+cd mac-downloads-sorter   # the folder you cloned into earlier
+git pull                  # fetch the newest version
+bash install.sh           # re-run the installer
+```
+
+> **Notes**
+> - Run it with **`bash install.sh`** (not `./install.sh`) — that works even if the file isn't marked executable, so you'll never hit a `permission denied`.
+> - Re‑running is **safe**: it updates the scripts, rebuilds anything missing, and keeps your settings and existing permission grants.
+> - If `git pull` ever reports a conflict (e.g. you edited a file locally), the simplest reset is to delete the folder and clone fresh: `cd .. && rm -rf mac-downloads-sorter && git clone https://github.com/Lucid06-K/mac-downloads-sorter.git`
+>
+> Already installed and just want the latest version? You don't need git at all — run **`dsort update`** ([details below](#updating)).
 
 ### Permissions
 
