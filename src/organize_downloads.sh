@@ -610,16 +610,25 @@ preview() {
 # every empty dir under Archive/ (sorter fully owns it) plus the sorter's OWN
 # empty sub-buckets in the live tree. Never the category roots, never your folders.
 prune_empty() {
-    local d
-    # clear empty nested subfolders under the parents that nest (deepest first)
-    for d in Archive Screenshots Media Documents; do
-        [ -d "$DIR/$d" ] && find "$DIR/$d" -mindepth 1 -type d -empty -delete 2>/dev/null
-    done
-    # remove any now-empty managed category folder (e.g. Installers & Apps, Fonts
-    # after their files were archived). rmdir only removes truly-empty dirs, so it
-    # never touches a folder that still holds files — or one you created yourself.
-    for d in "${MANAGED_DIRS[@]}" "Duplicates" "Large Files"; do
-        [ -d "$DIR/$d" ] && rmdir "$DIR/$d" 2>/dev/null
+    # Tidy empty managed folders. A folder counts as removable when nothing but
+    # disposable junk is left in it — a Finder .DS_Store, or an orphaned "~$…"
+    # Office lock file (the document it guarded is gone; Finder hides these, so
+    # the folder LOOKS empty). That junk is removed so the folder can go; a real
+    # file is NEVER deleted — a ~$ lock sitting next to its actual document is
+    # kept. Processes deepest-first so parents collapse once their children are
+    # cleared. Only ever touches the sorter's own managed folders.
+    local base d
+    for base in Archive "${MANAGED_DIRS[@]}" "Duplicates" "Large Files"; do
+        [ -d "$DIR/$base" ] || continue
+        find "$DIR/$base" -depth -type d 2>/dev/null | while IFS= read -r d; do
+            # keep the folder if it holds any subfolder or any real (non-junk) file
+            if find "$d" -mindepth 1 -maxdepth 1 \( -type d -o \( -type f ! -name '.DS_Store' ! -name '~$*' \) \) 2>/dev/null | grep -q .; then
+                continue
+            fi
+            # only junk (or nothing) remains → drop the junk, then the empty folder
+            find "$d" -maxdepth 1 -type f \( -name '.DS_Store' -o -name '~$*' \) -delete 2>/dev/null
+            rmdir "$d" 2>/dev/null
+        done
     done
 }
 

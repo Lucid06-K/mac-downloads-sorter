@@ -205,7 +205,7 @@ Entries are either a **category** (`Media`, `Documents/PDFs`, …) or a bare **f
 
 ## Safety
 
-- **Never deletes or overwrites.** Moves use a no‑clobber strategy and add ` (2)` on a name clash.
+- **Never deletes your files.** Moves use a no‑clobber strategy and add ` (2)` on a name clash. The *only* things it removes are empty managed category folders and the disposable junk left inside them — a Finder `.DS_Store`, or an orphaned `~$…` Office lock file (the document it guarded is gone) — so a category folder that *looks* empty in Finder doesn't linger. A real file is never touched (a `~$` lock sitting next to its actual document is kept).
 - **Everything is logged** to `~/Library/Logs/organize-downloads.log`.
 - **Leaves cloud "online-only" files alone.** Files whose contents live in the cloud (iCloud "Optimize Mac Storage", or Dropbox/OneDrive/Google Drive online-only placeholders) are skipped, so sorting never silently forces a multi‑GB download. They sort normally once you've downloaded them.
 - **Undo** keeps a history stack: revert individual changes, or whole runs, and keep stepping back run‑by‑run (`dsort undo`, repeatable; or pick items in the menu's Undo screen).
