@@ -74,7 +74,7 @@ macOS protects your folders and notifications, so during install you'll see **tw
 | Prompt | Why it's needed |
 |---|---|
 | **Files & Folders → Downloads Folder** | so the sorter can move your downloads into folders |
-| **Notifications** | so it can tell you what it just sorted *(optional — you can turn it off later)* |
+| **Notifications** | so it can tell you what it just sorted and where it was sorted *(optional — you can turn it off later)* |
 
 These are granted to the small helper apps the installer builds **on your Mac** (`OrganizeDownloads.app`, `DownloadsNotifier.app`). They can't ship pre‑approved — macOS ties permissions to each app's identity on each machine — which is exactly why the installer builds them locally.
 
