@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.27"
+VERSION="1.0.28"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=43200      # 12h — WatchPaths does the real work; this is just a backup
@@ -908,22 +908,44 @@ pick_largefile() {
     done
 }
 
+# single-field integer entry, styled like form_grace so every numeric setting
+# shares one in-menu UX — nothing drops to a raw command-line prompt.
+# args: title  blurb  unit  current  default  min  max
+# on save sets FORM_INT to the chosen value and returns 0; returns 1 if cancelled.
+form_int() {
+    local title="$1" blurb="$2" unit="$3" cur="$4" def="$5" min="$6" max="$7"
+    local val focus=0 k nv fresh=1     # fresh: first digit replaces the shown value, then appends
+    val=$((10#${cur:-0}))
+    FORM_INT=""
+    while :; do
+        printf '\033[H\033[2J'
+        printf '\n  %s%s%s  %s— %s%s\n' "$BLD" "$title" "$R" "$DIM" "$blurb" "$R"
+        printf '  %sType a number; it replaces the value. Default %s.%s\n\n' "$DIM" "$def" "$R"
+        if [ "$focus" -eq 0 ]; then printf '   %s ▸ %-8s [ %3s ] %s %s(%s–%s)%s\n' "$REV" "$unit" "$val" "$R" "$DIM" "$min" "$max" "$R"
+        else printf '     %-8s [ %3s ]   %s(%s–%s)%s\n' "$unit" "$val" "$DIM" "$min" "$max" "$R"; fi
+        printf '  %s\n' "${DIM}────────────────────────────${R}"
+        if [ "$focus" -eq 1 ]; then printf '  %s ▸ Save%s\n' "$REV" "$R"; else printf '     Save\n'; fi
+        printf '\n  %s↑/↓ field · type digits · ⌫ delete · d default · enter save · esc cancel%s\n' "$DIM" "$R"
+        k=$(read_key)
+        case "$k" in
+            up|k|down|j) focus=$(( (focus + 1) % 2 )) ;;
+            [0-9])  if [ "$focus" -eq 0 ]; then
+                        if [ "$fresh" = 1 ]; then nv="$k"; else nv=$(( val*10 + k )); fi
+                        [ "$nv" -gt "$max" ] && nv="$k"; val=$nv; fresh=0
+                    fi ;;
+            $'\177'|$'\b') [ "$focus" -eq 0 ] && { val=$(( val / 10 )); fresh=0; } ;;
+            d|D)    val=$def; fresh=1 ;;
+            esc|q)  return 1 ;;
+            "")     [ "$val" -lt "$min" ] && val=$min; FORM_INT="$val"; return 0 ;;
+        esac
+    done
+}
+
 prompt_archivedays() {
-    local cur input
-    cur=$(get_archivedays)
-    printf '\033[?25h'
-    printf '\n  %sChange archive age%s\n' "$BLD" "$R"
-    printf '  Files older than this (modified date) move into Archive/.\n'
-    printf '  Current: %s days   %sDefault: %s days%s\n' "$cur" "$DIM" "$RECOMMENDED_ARCHIVE_DAYS" "$R"
-    printf '  Days, %sd%s = default, blank = keep: ' "$BLD" "$R"
-    IFS= read -r input
-    printf '\033[?25l'
-    case "$input" in
-        "")        MSG="Archive age unchanged ($cur days)" ;;
-        d|D|r|R)   set_archivedays "$RECOMMENDED_ARCHIVE_DAYS" && MSG="Archive age → $RECOMMENDED_ARCHIVE_DAYS days (default)" ;;
-        *[!0-9]*)  MSG="Invalid — digits only" ;;
-        *)         if set_archivedays "$input"; then MSG="Archive age → $input days"; else MSG="Unchanged (minimum 1)"; fi ;;
-    esac
+    if form_int "Archive age" "files older than this (by modified date) move into Archive/" \
+                "Days" "$(get_archivedays)" "$RECOMMENDED_ARCHIVE_DAYS" 1 999; then
+        if set_archivedays "$FORM_INT"; then MSG="Archive age → $FORM_INT days"; else MSG="Unchanged (minimum 1)"; fi
+    else MSG="Archive age unchanged"; fi
 }
 
 # grace period as a Days/Hours/Minutes/Seconds form — type a number in each
@@ -969,21 +991,12 @@ form_grace() {
 }
 
 prompt_recent() {
-    local cur input
-    cur=$(get_recent_count)
-    printf '\033[?25h'
-    printf '\n  %sRecent activity on the menu%s\n' "$BLD" "$R"
-    printf '  How many recent moves to list under the main menu.\n'
-    printf '  Current: %s   %sDefault: %s · 0 hides the list%s\n' "$cur" "$DIM" "$RECOMMENDED_RECENT" "$R"
-    printf '  A number 0–10, %sd%s = default, blank = keep: ' "$BLD" "$R"
-    IFS= read -r input
-    printf '\033[?25l'
-    case "$input" in
-        "")        MSG="Recent activity unchanged ($cur)" ;;
-        d|D|r|R)   set_recent_count "$RECOMMENDED_RECENT" && MSG="Recent activity → $RECOMMENDED_RECENT lines" ;;
-        *[!0-9]*)  MSG="Invalid — digits only" ;;
-        *)         if set_recent_count "$input"; then [ "$input" = 0 ] && MSG="Recent activity list hidden" || MSG="Recent activity → $input line(s)"; else MSG="Unchanged (0–10)"; fi ;;
-    esac
+    if form_int "Recent activity" "moves listed under the main menu · 0 hides the list" \
+                "Lines" "$(get_recent_count)" "$RECOMMENDED_RECENT" 0 10; then
+        if set_recent_count "$FORM_INT"; then
+            [ "$FORM_INT" = 0 ] && MSG="Recent activity list hidden" || MSG="Recent activity → $FORM_INT line(s)"
+        else MSG="Unchanged (0–10)"; fi
+    else MSG="Recent activity unchanged"; fi
 }
 
 # full-screen sub-views (preview / undo / stats), each waits for a keypress
@@ -1131,7 +1144,7 @@ help_topic() {
 
   Downloads Sorter watches your ~/Downloads folder and files new downloads
   into tidy category folders — the instant they land (folder-watching),
-  plus an hourly safety-net pass.
+  plus a periodic safety-net pass (every 12h by default).
 
   It only ever MOVES files: it never deletes or overwrites, and every
   move can be undone.
@@ -1186,7 +1199,8 @@ EOF
        Duplicate routing    Screenshot dating       Metadata naming *
        Auto-unzip *         Auto-update *
 
-  Values (arrow-key pickers):
+  Values — all set right inside the menu (↑/↓ to move, type to enter a
+  number, enter to save, esc to cancel); nothing drops to a raw prompt:
 
        Auto-run interval    how often the safety-net timer fires (default 12h).
                             Real-time watching is always on, so downloads
@@ -1194,7 +1208,12 @@ EOF
 
        Archive age          move-to-Archive threshold in days (default 15)
 
+       Grace period         how long a download settles before sorting,
+                            as a D/H/M/S form (default 5m; 0 = immediate)
+
        Big files            size that sends a file to Large Files/ (default 5 GB)
+
+       Recent activity      moves listed under the main menu (default 3; 0 hides)
 
   * = OPT-IN, OFF by default — nothing changes until you switch it on:
 
@@ -1294,7 +1313,7 @@ EOF
       rebuilds revertable entries for files still sitting in their
       sorted folders, so older moves can be undone too
 
-   •  The 30-day Archive only MOVES files (into Archive/); the aging nudge
+   •  The Archive sweep only MOVES files (into Archive/); the aging nudge
       only reminds you. Nothing is ever auto-deleted.
 EOF
     ;;

@@ -98,7 +98,7 @@ These are granted to the small helper apps the installer builds **on your Mac** 
 ├── Misc/               everything else
 ├── Duplicates/         byte‑identical copies, set aside for review
 ├── Large Files/        files at/above your size threshold
-└── Archive/            mirrors all of the above for files older than 30 days
+└── Archive/            mirrors all of the above for files older than 15 days
 ```
 
 > Only **loose files at the top of `~/Downloads`** are sorted. **Any folder you create yourself is left untouched.**
@@ -192,7 +192,7 @@ Everything the menu does is scriptable. `dsort` is an alias to `~/Library/Script
 <summary><b>Always on</b></summary>
 
 - **Sorting** — by your custom rules first, then filename keywords (screenshots, `SCR‑…`, invoices…), then file extension.
-- **Archive** — files older than the *archive age* (default 30 days, by modified date) move into `Archive/`, keeping the same layout.
+- **Archive** — files older than the *archive age* (default 15 days, by modified date) move into `Archive/`, keeping the same layout.
 - **Duplicate routing** — a byte‑identical file (same size + checksum) goes to `Duplicates/` instead of becoming `name (2)`.
 - **Big‑file quarantine** — files at/above the threshold (default **5 GB**) go to `Large Files/` so you handle them deliberately. `Duplicates/` and `Large Files/` are never auto‑archived.
 - **Screenshot dating** — `Screen Shot …` / `SCR‑…` become `2026-06-14 Screenshot.png`, filed into `Screenshots/YYYY-MM/`.
@@ -215,9 +215,11 @@ Everything the menu does is scriptable. `dsort` is an alias to `~/Library/Script
 <details>
 <summary><b>Tunables</b> — how the pickers work</summary>
 
-- **Auto‑run interval** and **big‑file size** are arrow‑key pickers.
-- **Grace period** is a **Days / Hours / Minutes / Seconds** form — type a number in each field and they add up (e.g. Minutes `1` + Seconds `30` = `1m 30s`), up to 31 days. `0` = sort immediately (and turns off the detected heads‑up, since there's no waiting window).
-- **Archive age** and **recent‑count** are number entries.
+Every tunable is set **right inside the menu** — `↑`/`↓` to move, type to enter a number, `enter` to save, `esc` to cancel. Nothing drops to a raw command‑line prompt.
+
+- **Auto‑run interval** (default **12h**) and **big‑file size** (default **5 GB**) are arrow‑key pickers of sensible presets.
+- **Grace period** (default **5m**) is a **Days / Hours / Minutes / Seconds** form — type a number in each field and they add up (e.g. Minutes `1` + Seconds `30` = `1m 30s`), up to 31 days. `0` = sort immediately (and turns off the detected heads‑up, since there's no waiting window).
+- **Archive age** (default **15 days**) and **recent‑count** (default **3**) are single‑field number forms with the same look and keys.
 
 Each tunable marks its **default** so you can always get back to a sensible setting.
 
