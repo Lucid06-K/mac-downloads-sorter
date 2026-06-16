@@ -280,8 +280,10 @@ run_undo() {
 
 # dry-run preview and stats reuse the sorter's own classify()/MANAGED_DIRS by
 # sourcing it inside a subshell (its run-guard means sourcing has no side effects)
+# shellcheck source=/dev/null  # $SORTER is resolved at runtime
 run_preview() ( source "$SORTER" >/dev/null 2>&1 && preview )
 run_stats() (
+    # shellcheck source=/dev/null
     source "$SORTER" >/dev/null 2>&1 || { echo "Could not load sorter."; exit 1; }
     local d n sz arch
     printf '  %sFiles by category%s\n' "$BLD" "$R"
@@ -312,6 +314,7 @@ run_rules() (
         echo "(arrow may be -> or →; rules are checked before the built-in categories)"
         exit 0
     fi
+    # shellcheck source=/dev/null
     source "$SORTER" >/dev/null 2>&1
     if [ "${#RULE_PAT[@]}" -eq 0 ]; then echo "Rules file present but no valid rules parsed."; exit 0; fi
     echo "Custom rules (checked before built-ins):"
@@ -352,6 +355,7 @@ run_find() {
 # live "Folder categories" view: two columns (category | what routes there),
 # wrapped to the terminal width, plus your custom rules. Reads the real table.
 render_categories() (
+    # shellcheck source=/dev/null
     source "$SORTER" >/dev/null 2>&1
     local W left cat exts wrapped ln first i
     W=$(tput cols 2>/dev/null); case "$W" in ''|*[!0-9]*) W=80 ;; esac; [ "$W" -lt 56 ] && W=80
@@ -1605,6 +1609,7 @@ _colors_set() {  # <category> <colour|None> — rewrite the mapping for that cat
 }
 # apply a colour to a folder NOW (reuses the sorter's tagger so logic stays in one place)
 _colors_apply_now() {  # <category> <colour>
+    # shellcheck source=/dev/null
     ( source "$SORTER" >/dev/null 2>&1 && set_folder_color "$DIR/$1" "$2" ) 2>/dev/null
 }
 # colour picker for one category

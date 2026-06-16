@@ -233,8 +233,11 @@ classify() {
             [ -n "$file" ] || continue
             if [ "$wf_done" = 0 ]; then wf=$(where_from "$file"); wf_done=1; fi
             [ -n "$wf" ] || continue
+            # RULE_PAT is intentionally unquoted: user rules are globs (*.pdf, *invoice*)
+            # shellcheck disable=SC2254
             case "$wf" in ${RULE_PAT[$i]}) echo "${RULE_DEST[$i]}"; return ;; esac
         else
+            # shellcheck disable=SC2254  # unquoted on purpose — user rules are globs
             case "$lower" in ${RULE_PAT[$i]}) echo "${RULE_DEST[$i]}"; return ;; esac
         fi
     done
