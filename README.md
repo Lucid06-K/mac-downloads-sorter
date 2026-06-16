@@ -305,6 +305,8 @@ dsort exclude clear            # clear the exclude list
 - **Everything is logged** to `~/Library/Logs/organize-downloads.log`.
 - **No sudo, nothing system‑wide** — it lives entirely in your user account.
 
+> Found a security issue? Please report it privately — see the [security policy](SECURITY.md).
+
 ---
 
 ## How it works
