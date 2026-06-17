@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.29"
+VERSION="1.0.30"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=43200      # 12h — WatchPaths does the real work; this is just a backup
@@ -1102,27 +1102,40 @@ do_log() {
     if [ ! -s "$LOG" ]; then
         printf '\n   %s(no activity yet)%s\n' "$DIM" "$R"
     else
-        total=$(grep -c " moved: " "$LOG" 2>/dev/null)
+        total=$(grep -cE ' (moved|archived|duplicate|renamed|unzipped): ' "$LOG" 2>/dev/null)
         tail -n 40 "$LOG" | tail -r | awk \
             -v today="$today" -v ydy="$ydy" -v tlbl="$today_lbl" -v ylbl="$ydy_lbl" \
             -v dim="$DIM" -v grn="$GRN" -v bld="$BLD" -v yel="$YEL" -v r="$R" '
-        {
-            n = split($0, p, " -> ")
-            if (n >= 2 && substr($0, 21, 7) == "moved: ") {
-                dest = p[n]; sub(/\/$/, "", dest)
-                d = substr($0, 1, 10); t = substr($0, 12, 5)
-                name = substr($0, 28, length($0) - 27 - length(p[n]) - 4)
-                if (d != lastd) {
-                    lbl = (d == today) ? tlbl : (d == ydy) ? ylbl : d
-                    printf "\n  %s%s%s\n", bld, lbl, r
-                    lastd = d
-                }
-                if (length(name) > 38) name = substr(name, 1, 37) "…"
-                printf "   %s%s%s  %-38s %s→ %s%s\n", dim, t, r, name, grn, dest, r
-                moves++
-            } else {
-                printf "   %s⚠ %s%s\n", yel, $0, r
+        function header(d,   lbl) {
+            if (d != lastd) {
+                lbl = (d == today) ? tlbl : (d == ydy) ? ylbl : d
+                printf "\n  %s%s%s\n", bld, lbl, r
+                lastd = d
             }
+        }
+        {
+            d = substr($0, 1, 10); t = substr($0, 12, 5)
+            rest = substr($0, 21)                          # "verb: payload"
+            ci = index(rest, ": ")
+            verb = (ci ? substr(rest, 1, ci - 1) : "")
+            payload = (ci ? substr(rest, ci + 2) : "")
+            m = split(payload, p, " -> ")
+            if (ci && m >= 2 && (verb=="moved" || verb=="archived" || verb=="duplicate" || verb=="renamed" || verb=="unzipped")) {
+                dest = p[m]; sub(/\/$/, "", dest)
+                name = p[1]; for (i = 2; i < m; i++) name = name " -> " p[i]
+                if (length(name) > 38) name = substr(name, 1, 37) "…"
+                tag = (verb=="archived")  ? "  " dim "(archived)" r  \
+                    : (verb=="duplicate") ? "  " dim "(dup)" r       \
+                    : (verb=="renamed")   ? "  " dim "(renamed)" r   \
+                    : (verb=="unzipped")  ? "  " dim "(unzipped)" r  : ""
+                header(d)
+                printf "   %s%s%s  %-38s %s→ %s%s%s\n", dim, t, r, name, grn, dest, r, tag
+                moves++
+            } else if (rest ~ /fail|error/) {
+                header(d)                                  # genuine problems still stand out
+                printf "   %s⚠ %s%s\n", yel, rest, r
+            }
+            # routine non-move lines (weekly digest, skipped, …) are omitted from this compact view
         }
         END { if (!moves) printf "\n   %s(no moves in recent log)%s\n", dim, r }'
         printf '\n  %s\n' "${DIM}newest first · showing last 40 entries · $total moves in full log${R}"
