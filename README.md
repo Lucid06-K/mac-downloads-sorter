@@ -40,6 +40,8 @@ It watches `~/Downloads` and files every new download into clean category folder
 
 ## Install
 
+> 📦 **You need `git` first.** On a fresh Mac it isn't installed yet — run `git --version` to check. If it's missing, install Apple's Command Line Tools with `xcode-select --install`, click **Install** in the dialog, and wait for it to finish. (No `git`? Use the [ZIP download instead](#first-time-on-a-fresh-mac-git-not-found) — no install needed.)
+
 ```sh
 git clone https://github.com/Lucid06-K/mac-downloads-sorter.git
 cd mac-downloads-sorter
@@ -48,7 +50,8 @@ bash install.sh
 
 That's it — the installer copies two small scripts into `~/Library/Scripts`, builds two tiny helper apps, starts the sorter in the background, and adds the **`dsort`** command.
 
-> ⚠️ **Restart your shell (or open a new terminal tab) before using `dsort`** — the command won't be available until the shell reloads.
+> # ⚠️ Now restart your terminal!
+> **Quit Terminal completely (or open a new tab/window) before running `dsort`.** The command won't exist until the shell reloads — `dsort: command not found` just means you skipped this step.
 
 ### First time on a fresh Mac? (`git` not found)
 
@@ -69,6 +72,8 @@ unzip mac-downloads-sorter.zip
 cd mac-downloads-sorter-main
 bash install.sh
 ```
+
+> Either way, **restart your terminal afterwards** before running `dsort` (see the ⚠️ note above).
 
 ### Already cloned it before?
 
