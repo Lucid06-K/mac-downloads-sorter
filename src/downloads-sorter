@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.30"
+VERSION="1.0.31"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=43200      # 12h — WatchPaths does the real work; this is just a backup
@@ -412,6 +412,8 @@ do_categories() {
 #  • HTTPS only, even across redirects (--proto / --proto-redir '=https')
 #  • pinned to one repo URL — no arbitrary hosts
 #  • SHA-256 integrity check against the repo's published SHA256SUMS
+#  • version is taken from the (checksum-verified) script itself, not the
+#    standalone VERSION pointer; a pointer/package mismatch is surfaced
 #  • syntax-checked (bash -n) before anything is replaced
 #  • backs up the current scripts to *.bak (easy rollback)
 #  • user-space only (no sudo); preserves THIS install's launch-agent label
@@ -457,9 +459,16 @@ run_update() {
     # keep this machine's launch-agent label (done after verification, so it can't affect the hash)
     cur_label=$(grep -m1 '^LABEL=' "$SELF" 2>/dev/null)
     [ -n "$cur_label" ] && sed -i '' "s|^LABEL=.*|$cur_label|" "$tmp/downloads-sorter"
-    # authoritative new version = what the downloaded script actually reports
-    # (the VERSION pointer file can briefly disagree while the CDN cache settles)
+    # authoritative new version = what the downloaded script actually reports.
+    # The standalone VERSION pointer file is NOT in SHA256SUMS, but the script
+    # embeds its own VERSION and the script IS checksum-verified — so trust the
+    # embedded value and cross-check the pointer against it. A mismatch means the
+    # pointer was tampered with or the CDN is mid-propagation; either way we keep
+    # the verified value and never install on the strength of the pointer alone.
     instver=$(grep -m1 '^VERSION=' "$tmp/downloads-sorter" | cut -d'"' -f2); instver="${instver:-$newver}"
+    if [ -n "$newver" ] && [ "$newver" != "$instver" ]; then
+        echo "  note: server version pointer (v$newver) ≠ verified package (v$instver); trusting the verified package."
+    fi
     cp "$SORTER" "$SORTER.bak" 2>/dev/null; cp "$SELF" "$SELF.bak" 2>/dev/null
     install -m 0755 "$tmp/organize_downloads.sh" "$SORTER"
     install -m 0755 "$tmp/downloads-sorter" "$SELF"
