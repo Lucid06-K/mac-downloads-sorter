@@ -50,6 +50,26 @@ That's it — the installer copies two small scripts into `~/Library/Scripts`, b
 
 > ⚠️ **Restart your shell (or open a new terminal tab) before using `dsort`** — the command won't be available until the shell reloads.
 
+### First time on a fresh Mac? (`git` not found)
+
+`git` on macOS comes with Apple's **Command Line Tools**. On a brand‑new Mac they may not be installed yet — so the moment you run `git clone`, macOS pops up an *"install developer tools"* dialog (`xcode-select: note: No developer tools were found`) **instead of** cloning. The clone never happens, so the next `cd` / `bash install.sh` fail with *"no such file or directory."*
+
+Two ways through it:
+
+```sh
+# A) install the tools, click Install in the dialog, wait, then retry the clone above
+xcode-select --install
+```
+
+```sh
+# B) skip git entirely — download the ZIP (no developer tools needed)
+cd ~/Downloads
+curl -L -o mac-downloads-sorter.zip https://github.com/Lucid06-K/mac-downloads-sorter/archive/refs/heads/main.zip
+unzip mac-downloads-sorter.zip
+cd mac-downloads-sorter-main
+bash install.sh
+```
+
 ### Already cloned it before?
 
 If you cloned the repo on a previous attempt, `git clone` will fail with *"destination path already exists."* You don't need to re‑clone — just pull the latest code and re‑run the installer **from inside the existing folder**:
@@ -351,7 +371,7 @@ Removes the scripts, helper apps, launch agent, and settings. **Your sorted file
 
 ## Requirements
 
-macOS only. Uses `launchd`, `osacompile`, `ditto`, `mdls` — all built in. **No Homebrew or other dependencies.**
+macOS only. Uses `launchd`, `osacompile`, `ditto`, `mdls` — all built in. **No Homebrew or other dependencies.** `git` is only needed to *clone* the repo (it ships with Apple's Command Line Tools) — on a fresh Mac you can skip it with the [ZIP download](#first-time-on-a-fresh-mac-git-not-found) instead.
 
 ## License
 
