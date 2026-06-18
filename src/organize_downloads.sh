@@ -765,7 +765,7 @@ Documents/Spreadsheets|xls xlsx xlsm csv tsv numbers ods
 Documents/Word & Text|doc docx txt md markdown rtf rtfd pages odt tex bib wpd
 Documents/eBooks|epub mobi azw azw3 fb2 djvu
 Documents/Web|html htm webarchive mht mhtml webloc url
-Compressed Files|zip tar gz tgz bz2 tbz 7z rar xz zst lz lzma cab z
+Compressed Files/Zipped|zip tar gz tgz bz2 tbz 7z rar xz zst lz lzma cab z   (auto-unzip extracts contents into Compressed Files/Unzipped/)
 Disk Images|dmg iso img toast cdr vcd
 Installers & Apps|pkg mpkg app xip msi exe deb rpm appimage apk
 Code & Scripts|py ipynb sh zsh bash js mjs cjs ts tsx jsx json jsonl yaml yml toml xml sql css scss sass less c cc cpp h hpp java rb go rs php swift kt kts scpt applescript plist ini cfg conf env lua pl

@@ -114,7 +114,7 @@ These are granted to the small helper apps the installer builds **on your Mac** 
 ├── Screenshots/        2026-06/2026-06-14 Screenshot.png   (dated, by month)
 ├── Media/              Images · Audio · Video
 ├── Documents/          PDFs · Slides · Spreadsheets · Word & Text · eBooks · Web
-├── Compressed Files/   zip, tar, 7z, rar …
+├── Compressed Files/   Zipped/ (zip, tar, 7z, rar …) · Unzipped/ (auto-unzip output)
 ├── Disk Images/        dmg, iso …
 ├── Installers & Apps/  pkg, app, exe …
 ├── Code & Scripts/     py, js, sh, json …
@@ -186,7 +186,7 @@ Everything the menu does is scriptable. `dsort` is an alias to `~/Library/Script
 | `duplicates` | on | route byte‑identical files to `Duplicates/` |
 | `screenshotdate` | on | date‑prefix screenshots + bucket by month |
 | `metanames` | off | rename PDFs from their embedded title |
-| `autounzip` | off | expand `.zip` into a same‑named subfolder |
+| `autounzip` | off | extract `.zip` into `Compressed Files/Unzipped/` (archive kept in `Zipped/`) |
 | `on` / `off` | — | enable/disable the **whole** sorter |
 
 **Tunables** — `d` = default
@@ -232,7 +232,7 @@ Everything the menu does is scriptable. `dsort` is an alias to `~/Library/Script
 - **Detected heads‑up** — a banner the moment a download is spotted, showing where it'll go and the grace‑period wait (e.g. `report.pdf -> Documents/PDFs (sorting in ~2m)`). *Settings → Notifications.*
 - **Filename cleanup** — strips URL junk (`%20`, `?token=…`), long random hash blobs, and trailing `copy`/`v2`. Conservative (it protects real names like `Chapter_03_Glycolysis`); every rename is logged and undoable.
 - **Metadata naming** — renames PDFs from their embedded title (via Spotlight's `mdls`).
-- **Auto‑unzip** — expands `.zip` files into a same‑named subfolder (size‑guarded against zip‑bombs; contents aren't re‑sorted).
+- **Auto‑unzip** — extracts `.zip` files into a same‑named folder under `Compressed Files/Unzipped/`, while the archive itself is filed in `Compressed Files/Zipped/` (size‑guarded against zip‑bombs; contents aren't re‑sorted).
 - **Weekly digest** — a once‑a‑week notification summarising the week (file count, archived count, top categories). Silent in weeks with no activity.
 
 </details>

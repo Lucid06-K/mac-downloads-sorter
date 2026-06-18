@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.34"
+VERSION="1.0.35"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=43200      # 12h — WatchPaths does the real work; this is just a backup
@@ -640,7 +640,7 @@ describe_settings() {
         7)  echo "Files at/above this size go to Large Files/ to handle deliberately (never archived)." ;;
         8)  echo "Rename screenshots to '2026-06-14 Screenshot.png' and file them by month." ;;
         9)  echo "Opt-in: rename PDFs from their embedded title (via Spotlight metadata)." ;;
-        10) echo "Opt-in: expand downloaded .zip files into a same-named subfolder (size-guarded)." ;;
+        10) echo "Opt-in: extract downloaded .zip files into Compressed Files/Unzipped/ (the archive stays in Zipped/; size-guarded)." ;;
         11) echo "Opt-in: check GitHub daily on open and install verified updates automatically." ;;
         12) echo "How many recent moves to list under the main menu (0 hides the list)." ;;
         13) echo "Opt-in: a once-a-week notification summarising what got sorted." ;;
@@ -887,7 +887,7 @@ toggle_metanames() {
 
 toggle_autounzip() {
     if unzip_is_on; then rm -f "$AUTOUNZIP_FLAG"; MSG="Auto-unzip OFF"
-    else touch "$AUTOUNZIP_FLAG"; MSG="Auto-unzip ON — .zip files expand into a same-named subfolder (opt-in)"; fi
+    else touch "$AUTOUNZIP_FLAG"; MSG="Auto-unzip ON — .zip contents extract into Compressed Files/Unzipped/ (archive kept in Zipped/)"; fi
 }
 
 toggle_autoupdate() {
@@ -1286,7 +1286,8 @@ EOF
        Filename cleanup     tidies messy names (URL junk, random hashes,
                             trailing "copy"/"v2"); conservative + undoable
        Metadata naming      renames PDFs from their embedded title
-       Auto-unzip           expands .zip into a same-named subfolder
+       Auto-unzip           extracts .zip into Compressed Files/Unzipped/
+                            (the archive itself stays in Zipped/)
        Auto-update          see the "Updating & security" topic
 EOF
     ;;
