@@ -69,6 +69,17 @@ fmt_secs() {
     elif [ $((s % 60)) -eq 0 ]; then echo "$((s/60))m"
     else echo "$((s/60))m $((s%60))s"; fi
 }
+
+# make a string safe for the notification body. The applet reads the body via
+# AppleScript `system attribute`, which decodes the env var as MacRoman — so any
+# non-ASCII byte mojibakes (a macOS screenshot's U+202F narrow no-break space
+# before "PM" became "‚ÄØ"). Fold the common unicode spaces to a normal space,
+# then drop any remaining high bytes so what's left renders cleanly.
+ascii_label() {
+    LC_ALL=C printf '%s' "$1" \
+        | LC_ALL=C sed $'s/\xe2\x80\xaf/ /g; s/\xc2\xa0/ /g; s/\xe2\x80\x89/ /g' \
+        | LC_ALL=C tr -d '\200-\377'
+}
 # announce a detected download once (deduped within ~2 grace periods). Body is
 # ASCII so the env-passed text renders cleanly in the notification.
 announce_detected() {
@@ -80,7 +91,7 @@ announce_detected() {
     fi
     { [ -f "$ANNOUNCED" ] && awk -F'\t' -v n="$now" '(n-$1)<3600' "$ANNOUNCED"
       printf '%s\t%s\n' "$now" "$file"; } > "$ANNOUNCED.tmp" 2>/dev/null && mv "$ANNOUNCED.tmp" "$ANNOUNCED" 2>/dev/null
-    DSORT_BODY="$base -> $rel  (sorting in ~$(fmt_secs "$wait"))" DSORT_TITLE="Download detected" "$NOTIFIER" >/dev/null 2>>"$LOG"
+    DSORT_BODY="$(ascii_label "$base") -> $rel  (sorting in ~$(fmt_secs "$wait"))" DSORT_TITLE="Download detected" "$NOTIFIER" >/dev/null 2>>"$LOG"
 }
 
 # weekly "old stuff in Archive" nudge — never deletes; OFF while .noaging exists
