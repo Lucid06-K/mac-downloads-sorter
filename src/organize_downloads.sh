@@ -276,7 +276,7 @@ classify() {
         epub|mobi|azw|azw3|fb2|djvu)                                                    echo "Documents/eBooks" ;;
         html|htm|webarchive|mht|mhtml|webloc|url)                                       echo "Documents/Web" ;;
 
-        zip|tar|gz|tgz|bz2|tbz|7z|rar|xz|zst|lz|lzma|cab|z)                             echo "Compressed Files" ;;
+        zip|tar|gz|tgz|bz2|tbz|7z|rar|xz|zst|lz|lzma|cab|z)                             echo "Compressed Files/Zipped" ;;
         dmg|iso|img|toast|cdr|vcd)                                                      echo "Disk Images" ;;
         pkg|mpkg|app|xip|msi|exe|deb|rpm|appimage|apk)                                  echo "Installers & Apps" ;;
 
@@ -336,9 +336,11 @@ meta_on()       { [ -e "$META_FLAG" ]; }
 autounzip_on()  { [ -e "$AUTOUNZIP_FLAG" ]; }
 
 # try_unzip <zipfile> — expand a .zip into a unique same-named subfolder under
-# Compressed Files/ (via macOS ditto), then keep the original archive there too.
-# Guarded against zip bombs (skips if uncompressed > 5 GB). Contents are NOT
-# re-sorted. Best-effort: any failure just files the archive normally.
+# Compressed Files/Unzipped/ (via macOS ditto), then file the original archive
+# under Compressed Files/Zipped/ so archives and their extracted contents stay
+# in separate subfolders. Guarded against zip bombs (skips if uncompressed
+# > 5 GB). Contents are NOT re-sorted. Best-effort: any failure just files the
+# archive normally.
 try_unzip() {
     local zip="$1" base name dest total n d
     base=$(basename "$zip"); name="${base%.*}"
@@ -346,18 +348,18 @@ try_unzip() {
     case "$total" in ''|*[!0-9]*) total=0 ;; esac
     if [ "$total" -gt $((5 * 1024 * 1024 * 1024)) ]; then
         log "unzip skipped (>5GB uncompressed): $base"
-        move_to "$zip" "Compressed Files"; return
+        move_to "$zip" "Compressed Files/Zipped"; return
     fi
-    d="$DIR/Compressed Files/$name"; n=2
-    while [ -e "$d" ]; do d="$DIR/Compressed Files/$name ($n)"; n=$((n+1)); done
+    d="$DIR/Compressed Files/Unzipped/$name"; n=2
+    while [ -e "$d" ]; do d="$DIR/Compressed Files/Unzipped/$name ($n)"; n=$((n+1)); done
     dest="$d"; mkdir -p "$dest"
     if ditto -x -k "$zip" "$dest" 2>>"$LOG"; then
-        log "unzipped: $base -> Compressed Files/$(basename "$dest")/"
+        log "unzipped: $base -> Compressed Files/Unzipped/$(basename "$dest")/"
         MOVE_COUNT=$((MOVE_COUNT+1)); SUMMARY="${SUMMARY}Compressed Files (unzipped)"$'\n'
     else
         log "unzip failed: $base"; rmdir "$dest" 2>/dev/null
     fi
-    move_to "$zip" "Compressed Files"
+    move_to "$zip" "Compressed Files/Zipped"
 }
 
 # screenshot_target <basename> <filepath> -> "Screenshots/YYYY-MM<TAB>YYYY-MM-DD Label.ext"
@@ -538,7 +540,7 @@ scan() {
             fi
         fi
         # opt-in auto-unzip of .zip archives
-        if [ "$rel" = "Compressed Files" ] && [ "$ext" = "zip" ] && autounzip_on; then
+        if [ "$rel" = "Compressed Files/Zipped" ] && [ "$ext" = "zip" ] && autounzip_on; then
             try_unzip "$f"
             continue
         fi
