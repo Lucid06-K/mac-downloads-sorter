@@ -30,7 +30,19 @@ chmod 600 ~/.config/dsort/update.key
 openssl pkey -in ~/.config/dsort/update.key -pubout      # paste into UPDATE_PUBKEY
 ```
 
-## Shipping a release (the signing step)
+## Shipping a release
+
+**Preferred:** use the release helper — it bumps both VERSIONs, syntax-checks,
+regenerates **and signs** the manifest (refusing to proceed if the key is
+missing/mismatched), syncs the live copy, and commits + pushes:
+
+```sh
+./release.sh --dry-run 1.0.34       # validate everything (incl. real signing) first
+./release.sh 1.0.34 -m "fix: …"     # cut it: bump → sign → commit → push
+./release.sh 1.0.34                 # or stop before commit so you can review
+```
+
+### Manual fallback (what release.sh does under the hood)
 
 After you've finalised `src/`, bumped both VERSIONs, and synced the live copy,
 regenerate **and sign** the manifest, then commit the `.sig` alongside it:
