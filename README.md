@@ -356,11 +356,12 @@ Or use **Check for updates** in the menu. Turn on **Settings → Auto‑update**
 **Updates are kept safe:**
 
 - **HTTPS only**, pinned to this repository (redirects forced to HTTPS too).
-- Verified against the repo's published **SHA‑256 checksums** — a mismatch (corruption or tampering) aborts the update.
+- **Cryptographically signed.** The checksum manifest is verified against an **RSA‑3072 signature** made with the maintainer's **offline** key before anything is installed — so even a compromise of GitHub, the CDN, or the TLS connection can't push code without that key. Verification uses macOS's built‑in `openssl`, so you install nothing extra.
+- Each file is then **SHA‑256 checked** against the signed manifest — a mismatch (corruption or tampering) aborts the update.
 - **Syntax‑checked** before anything is replaced; current scripts backed up to `*.bak`.
 - **User space only — never `sudo`.**
 
-> Checksum + HTTPS protect the download path; for a manual update you can review the diff on GitHub first. As with any auto‑updater you're ultimately trusting the source repo, which is why auto‑update is opt‑in.
+> The signature is the trust anchor: it's checked with the public key baked into your *already‑installed* copy, so a malicious server can't simply swap the manifest. The only thing it can't cover is the very first install (you're trusting the initial clone) — for a manual update you can always review the diff on GitHub first. Maintainer details: [SIGNING.md](SIGNING.md).
 
 ---
 

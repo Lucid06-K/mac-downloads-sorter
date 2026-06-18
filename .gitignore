@@ -1,2 +1,7 @@
 .DS_Store
 *.app/
+
+# update-signing private keys must NEVER be committed (they live offline, e.g.
+# ~/.config/dsort/update.key). Belt-and-suspenders even though they're out of tree.
+*.key
+*.pem

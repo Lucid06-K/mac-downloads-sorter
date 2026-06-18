@@ -58,10 +58,10 @@ The project is built to be conservative by default:
 
 - **Runs entirely in user space — never `sudo`**, nothing system‑wide.
 - **Never deletes your files.** Moves are no‑clobber; only empty folders and disposable junk (`.DS_Store`, orphaned `~$…` locks) are ever removed, and every move is logged and undoable.
-- **Updates are verified:** fetched **over HTTPS only**, pinned to this repository (redirects forced to HTTPS), checked against published **SHA‑256 checksums**, **syntax‑checked** (`bash -n`) before anything is replaced, and the previous scripts are backed up to `*.bak`. Auto‑update is **off by default**.
+- **Updates are signed and verified:** the checksum manifest is verified against an **RSA‑3072 signature** made with the maintainer's **offline** key (checked with the public key baked into your installed copy) *before* anything is touched — so a compromise of GitHub, the CDN, or TLS alone cannot push code. Each file is then matched against the signed **SHA‑256 checksums**, **syntax‑checked** (`bash -n`), and the previous scripts backed up to `*.bak`. Fetched **over HTTPS only**, pinned to this repository (redirects forced to HTTPS). Auto‑update is **off by default**. Verification uses macOS's built‑in `openssl` — no extra dependency. See [SIGNING.md](SIGNING.md).
 - **No `eval`**; untrusted inputs (filenames, download‑origin URLs, the activity log, config files) are handled as quoted data, never executed.
 - **No network access** anywhere except the updater.
 
 ## Trust note
 
-As with any tool that can auto‑update, you are ultimately trusting this repository as the source. For a manual update you can review the diff on GitHub first, and auto‑update is opt‑in for exactly this reason.
+Update signing means a malicious repo/CDN/TLS can't push code without the maintainer's offline private key. The remaining trust assumptions are: (1) the **first install** — you're trusting the initial clone, since that's where your copy of the public key comes from; and (2) the maintainer's key custody. For a manual update you can always review the diff on GitHub first, and auto‑update is opt‑in for exactly these reasons.
