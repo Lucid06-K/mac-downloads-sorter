@@ -45,7 +45,7 @@ UNDO_FILE="$HOME/Library/Scripts/organize_downloads.lastrun"
 HISTORY_FILE="$HOME/Library/Scripts/organize_downloads.history"
 SORTER="$HOME/Library/Scripts/organize_downloads.sh"
 FILTER_CATS=( "Screenshots" "Media" "Documents" "Compressed Files" "Installers & Apps" "Disk Images" "Code & Scripts" "Invoices & Receipts" "Design" "Fonts" "3D & CAD" "Torrents" "Data" "Calendars & Contacts" "Misc" )
-VERSION="1.0.35"
+VERSION="1.0.36"
 REPO_RAW="https://raw.githubusercontent.com/Lucid06-K/mac-downloads-sorter/main"
 SELF="$HOME/Library/Scripts/downloads-sorter"
 RECOMMENDED_INTERVAL=43200      # 12h — WatchPaths does the real work; this is just a backup
@@ -71,7 +71,7 @@ ss_is_on()     { [ ! -e "$SS_FLAG" ]; }      # screenshot date-prefix + buckets,
 meta_is_on()   { [ -e "$META_FLAG" ]; }      # PDF metadata naming, opt-in OFF
 unzip_is_on()  { [ -e "$AUTOUNZIP_FLAG" ]; } # auto-unzip .zip, opt-in OFF
 filter_count() { local f n=0; [ "$1" = only ] && f="$ONLY_FILE" || f="$EXCLUDE_FILE"; [ -r "$f" ] && n=$(grep -cvE '^[[:space:]]*(#|$)' "$f" 2>/dev/null); echo "${n:-0}"; }
-rules_count()  { local n=0; [ -r "$HOME/.downloads-rules.conf" ] && n=$(grep -hcE '\->|→' "$HOME/.downloads-rules.conf" 2>/dev/null); echo "${n:-0}"; }
+rules_count()  { local n=0; [ -r "$HOME/.downloads-rules.conf" ] && n=$(grep -vE '^[[:space:]]*#' "$HOME/.downloads-rules.conf" 2>/dev/null | grep -cE '\->|→'); echo "${n:-0}"; }
 colors_count() { local n=0; [ -r "$COLORS_FILE" ] && n=$(grep -cE '\|' "$COLORS_FILE" 2>/dev/null); echo "${n:-0}"; }
 autoupdate_on() { [ -e "$AUTOUPDATE_FLAG" ]; }   # auto-install updates, opt-in OFF
 get_largefile() {
@@ -79,7 +79,7 @@ get_largefile() {
     [ -r "$LFFILE" ] && v=$(tr -dc '0-9' < "$LFFILE" 2>/dev/null)
     [ -n "$v" ] && echo "$v" || echo "$RECOMMENDED_LARGEFILE_GB"
 }
-set_largefile() { case "$1" in *[!0-9]*|"") return 1 ;; esac; printf '%s\n' "$1" > "$LFFILE"; }
+set_largefile() { case "$1" in *[!0-9]*|"") return 1 ;; esac; printf '%s\n' "$((10#$1))" > "$LFFILE"; }   # 10# avoids octal on a leading 0 (e.g. 09)
 
 sorter_on()  { launchctl enable "$TARGET"; launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; }
 sorter_off() { launchctl bootout "$TARGET" 2>/dev/null; launchctl disable "$TARGET"; }
@@ -1088,6 +1088,7 @@ do_undo() {
         _undo_row $show       "$focus" "Revert selected ($cnt)"
         _undo_row $((show+1)) "$focus" "Revert the latest run ($lrn file(s))"
         _undo_row $((show+2)) "$focus" "← Back"
+        [ -n "$MSG" ] && { printf '\n  %s%s%s\n' "$GRN" "$MSG" "$R"; MSG=""; }   # show feedback (e.g. "Nothing ticked") for one frame
         printf '\n  %s↑/↓ move · enter tick / run · esc back%s\n' "$DIM" "$R"
         nrows=$((show+3))
         key=$(read_key)
@@ -1186,16 +1187,22 @@ do_log() {
     IFS= read -r -s -n 1 _ 2>/dev/null
 }
 
-# one keypress -> token (up/down/esc/empty-string for enter+space/literal char)
+# one keypress -> token (up/down/esc/ignore/empty-string for enter+space/literal char)
 read_key() {
-    local k rest
+    local k rest d
     IFS= read -r -s -n 1 k || return 1
     if [ "$k" = $'\033' ]; then
         IFS= read -r -s -n 2 -t 1 rest 2>/dev/null
         case "$rest" in
             '[A') printf 'up' ;;
             '[B') printf 'down' ;;
-            *)    printf 'esc' ;;
+            '')   printf 'esc' ;;      # a genuinely lone ESC key
+            *)    # any other sequence (→/←, Home, End, Delete=[3~, PgUp/PgDn, F-keys):
+                  # drain to its final byte and treat as a no-op — a stray arrow must
+                  # NOT be read as Esc (which quits the menu) or leak bytes to the shell.
+                  case "$rest" in *[A-Za-z~]) : ;; *)
+                      while IFS= read -r -s -n 1 -t 1 d 2>/dev/null; do case "$d" in [A-Za-z~]) break ;; esac; done ;; esac
+                  printf 'ignore' ;;
         esac
     else
         printf '%s' "$k"
@@ -1460,20 +1467,24 @@ do_help() {
 # do_filter <exclude|only> — interactive multi-select: tick categories and/or add
 # file extensions, saved to the matching list file. Arrows move, Enter toggles/acts.
 do_filter() {
-    local kind="$1" file title verb sel="" exts="" line c
+    local kind="$1" file title verb sel="" line c exts
+    local -a exts_arr=()          # non-category entries as an array — a value with
+                                  # spaces (e.g. a custom "Word & Text" category) must
+                                  # not be word-split when written back out.
     if [ "$kind" = only ]; then file="$ONLY_FILE"; title="Only sort these"; verb="sort only";
     else file="$EXCLUDE_FILE"; title="Exclude from sorting"; verb="exclude"; fi
     if [ -r "$file" ]; then
         while IFS= read -r line || [ -n "$line" ]; do
             case "$line" in ''|'#'*) continue ;; esac
             local known=0; for c in "${FILTER_CATS[@]}"; do [ "$c" = "$line" ] && { known=1; break; }; done
-            if [ "$known" = 1 ]; then sel="$sel$line"$'\n'; else exts="$exts $line"; fi
+            if [ "$known" = 1 ]; then sel="$sel$line"$'\n'; else exts_arr+=("$line"); fi
         done < "$file"
     fi
-    exts="${exts# }"
+    exts="${exts_arr[*]}"
     local n=${#FILTER_CATS[@]} nrows focus=0 key i mark input; nrows=$((n+3))
     printf '\033[?25l'
     while :; do
+        exts="${exts_arr[*]}"           # display string, rebuilt from the array each frame
         printf '\033[H\033[2J'
         printf '\n  %s%s%s  %s\n' "$BLD" "$title" "$R" "${DIM}— tick categories and/or add file types to $verb${R}"
         printf '  %s\n' "${DIM}─────────────────────────────────────────────${R}"
@@ -1505,13 +1516,14 @@ do_filter() {
                     printf '\n  Current file types: %s\n' "${exts:-(none)}"
                     printf '  Enter extensions to %s (space-separated, no dots; blank keeps current): ' "$verb"
                     IFS= read -r input; printf '\033[?25l'
-                    [ -n "$input" ] && exts=$(printf '%s' "$input" | tr 'A-Z' 'a-z' | tr -s ' ')
-                elif [ "$focus" -eq $((n+1)) ]; then sel=""; exts=""
+                    # split the typed extensions into the array (set -f: no globbing on the split)
+                    [ -n "$input" ] && { set -f; read -r -a exts_arr <<< "$(printf '%s' "$input" | tr 'A-Z' 'a-z')"; set +f; }
+                elif [ "$focus" -eq $((n+1)) ]; then sel=""; exts_arr=()
                 else break; fi ;;
         esac
     done
     : > "$file"
-    { printf '%s' "$sel" | sed '/^$/d'; for c in $exts; do printf '%s\n' "$c"; done; } >> "$file"
+    { printf '%s' "$sel" | sed '/^$/d'; for c in "${exts_arr[@]}"; do printf '%s\n' "$c"; done; } >> "$file"
     printf '\033[?25l'
     MSG="$title: $(filter_count "$kind") item(s) saved"
 }
@@ -2081,7 +2093,16 @@ case "$1" in
             "")    if [ -s "$ff" ] && grep -qvE '^[[:space:]]*(#|$)' "$ff"; then
                        echo "$kind list (categories or extensions):"; grep -vE '^[[:space:]]*(#|$)' "$ff" | sed 's/^/  /'
                    else echo "$kind list is empty — set it from: dsort → Settings"; fi ;;
-            *)     shift; for a in "$@"; do printf '%s\n' "$a" >> "$ff"; done
+            *)     shift
+                   for a in "$@"; do
+                       # lowercase a bare extension token (matches the TUI, which
+                       # lowercases too) so `dsort exclude DMG` actually matches; leave
+                       # category paths / multi-word names (with / or spaces) as typed.
+                       case "$a" in
+                           */*|*" "*) printf '%s\n' "$a" >> "$ff" ;;
+                           *)         printf '%s\n' "$(printf '%s' "$a" | tr 'A-Z' 'a-z')" >> "$ff" ;;
+                       esac
+                   done
                    echo "added to $kind list: $*" ;;
         esac ;;
     version|--version|-v)
@@ -2119,7 +2140,7 @@ Usage: dsort <command>   (bare = interactive UI)
   metanames on|off    opt-in: rename PDFs from their embedded title
   autounzip on|off    opt-in: expand .zip into a same-named subfolder
   interval [secs|d]   show/set safety-net auto-run cadence (d = default)
-  graceperiod [secs|d]  settle time before a download is sorted (max 7 days)
+  graceperiod [secs|d]  settle time before a download is sorted (0 = immediate, max 31 days)
   archivedays [n|d]   show/set Archive age in days (d = default)
   recentcount [0-10|d]  recent moves listed under the menu (0 = hide)
   find <name>         where a download got filed

@@ -102,6 +102,53 @@ else
     info "DownloadsNotifier.app already present and current — keeping it"
 fi
 
+# 2.5) migrate any prior install & preserve the user's schedule -------------
+# Older installs (and pre-rename builds) used a different launchd label. If we
+# ignore them we end up with TWO agents both watching ~/Downloads and racing on
+# shared state, and `dsort off` on the new label wouldn't stop the old one.
+LEGACY_LABELS="com.tonnam.organize-downloads"
+INTERVAL_DEFAULT=43200
+KEEP_INTERVAL="$INTERVAL_DEFAULT"
+WAS_DISABLED=0
+
+# read the currently-scheduled interval from any of our existing plists so a
+# re-run (the documented `git pull && bash install.sh` update) doesn't silently
+# reset a custom `dsort interval N`.
+for _lbl in "$LABEL" $LEGACY_LABELS; do
+    _p="$AGENTS/$_lbl.plist"
+    [ -f "$_p" ] || continue
+    _iv="$(/usr/libexec/PlistBuddy -c 'Print :StartInterval' "$_p" 2>/dev/null || true)"
+    case "$_iv" in ''|*[!0-9]*) ;; *) KEEP_INTERVAL="$_iv"; break ;; esac
+done
+# also honour any plist we're about to migrate that runs OUR organizer app
+for _p in "$AGENTS"/*.plist; do
+    [ -f "$_p" ] || continue
+    grep -q 'OrganizeDownloads.app/Contents/MacOS/applet' "$_p" 2>/dev/null || continue
+    _iv="$(/usr/libexec/PlistBuddy -c 'Print :StartInterval' "$_p" 2>/dev/null || true)"
+    case "$_iv" in ''|*[!0-9]*) ;; *) [ "$KEEP_INTERVAL" = "$INTERVAL_DEFAULT" ] && KEEP_INTERVAL="$_iv" ;; esac
+done
+# if the sorter was deliberately turned off (launchctl disable), don't silently re-enable it
+if launchctl print-disabled "gui/$UID_NUM" 2>/dev/null | grep -qE "\"($LABEL|$(printf '%s' "$LEGACY_LABELS" | tr ' ' '|'))\" => (true|disabled)"; then
+    WAS_DISABLED=1
+fi
+
+# tear down every prior agent of ours (known legacy labels + any plist that runs
+# our organizer app under some other label) before installing the current one.
+for _lbl in $LEGACY_LABELS; do
+    launchctl bootout "gui/$UID_NUM/$_lbl" 2>/dev/null || true
+    launchctl disable "gui/$UID_NUM/$_lbl" 2>/dev/null || true
+    rm -f "$AGENTS/$_lbl.plist"
+done
+for _p in "$AGENTS"/*.plist; do
+    [ -f "$_p" ] || continue
+    [ "$_p" = "$PLIST" ] && continue
+    grep -q 'OrganizeDownloads.app/Contents/MacOS/applet' "$_p" 2>/dev/null || continue
+    _lbl="$(/usr/libexec/PlistBuddy -c 'Print :Label' "$_p" 2>/dev/null || true)"
+    [ -n "$_lbl" ] && { launchctl bootout "gui/$UID_NUM/$_lbl" 2>/dev/null || true; launchctl disable "gui/$UID_NUM/$_lbl" 2>/dev/null || true; }
+    rm -f "$_p"
+    info "Migrated an older sorter agent (${_lbl:-unknown}) → $LABEL"
+done
+
 # 3) launch agent (paths templated to THIS user) ----------------------------
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -119,7 +166,7 @@ cat > "$PLIST" <<PLIST
         <string>$HOME/Downloads</string>
     </array>
     <key>StartInterval</key>
-    <integer>43200</integer>
+    <integer>$KEEP_INTERVAL</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>ThrottleInterval</key>
@@ -138,9 +185,14 @@ fi
 
 # 4) load it ----------------------------------------------------------------
 launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
-launchctl enable "gui/$UID_NUM/$LABEL" 2>/dev/null || true
-ok "Loaded and enabled the sorter"
+if [ "$WAS_DISABLED" = 1 ]; then
+    # respect a deliberate `dsort off`: install the plist but leave it disabled
+    info "Sorter was turned off previously — leaving it off (turn on with: dsort on)"
+else
+    launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
+    launchctl enable "gui/$UID_NUM/$LABEL" 2>/dev/null || true
+    ok "Loaded and enabled the sorter (auto-run every $(( KEEP_INTERVAL / 3600 ))h)"
+fi
 
 # 5) convenience alias ------------------------------------------------------
 # default to zsh's rc (macOS default shell); use bashrc only if login shell is bash

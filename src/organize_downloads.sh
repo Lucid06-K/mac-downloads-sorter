@@ -325,7 +325,10 @@ clean_name() {
 # NOT touch #fragments — "C# Notes" and "Track #1" are legitimate names.
 clean_basename() {
     local b="$1" stem ext
-    b="${b%%\?*}"
+    # Strip a trailing URL-style ?query ONLY when a dot precedes the '?' (e.g.
+    # photo.jpg?dl=1) — never when the '?' comes before the extension (e.g.
+    # "Really?.pdf"), which would otherwise drop the extension entirely.
+    case "$b" in *.*\?*) b="${b%%\?*}" ;; esac
     if [[ "$b" == *.* ]]; then ext=".${b##*.}"; stem="${b%.*}"; else ext=""; stem="$b"; fi
     printf '%s%s' "$(clean_name "$stem")" "$ext"
 }
@@ -604,6 +607,12 @@ preview() {
         case "$base" in '~$'*) continue ;; esac
         ext=$(echo "${base##*.}" | tr '[:upper:]' '[:lower:]')
         case "$ext" in crdownload|download|part|partial|tmp|opdownload|aria2|'!ut') continue ;; esac
+        # match scan(): an online-only (evicted) cloud placeholder is left in place,
+        # so don't promise a move the real run will never make.
+        if is_dataless "$f"; then
+            printf '%s\n    → (skipped — online-only cloud file, not downloaded yet)\n' "$base"
+            count=$((count+1)); continue
+        fi
         rel=$(classify "$base" "$f")
         if ! in_scope "$ext" "$rel"; then
             printf '%s\n    → (skipped — excluded by your filter)\n' "$base"
@@ -827,7 +836,12 @@ main() {
     # a fresh download usually finishes within MIN_AGE: instead of leaving young
     # files for the next timer pass, wait them out once and rescan
     if [ "$YOUNG_SKIPPED" = 1 ]; then
-        sleep $((WAIT + 2))
+        # Wait young files out once — but cap the in-process wait so a long grace
+        # period (settable up to ~31 days) can't leave this launchd job sleeping for
+        # hours. Anything still too fresh after the cap is picked up by the next
+        # WatchPaths trigger or the StartInterval safety-net pass.
+        local w=$((WAIT + 2)); [ "$w" -gt 600 ] && w=600
+        sleep "$w"
         scan
     fi
     archive_old
