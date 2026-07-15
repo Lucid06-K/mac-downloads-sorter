@@ -44,6 +44,13 @@ if [ -r "$AGEFILE" ]; then
     [ -n "$_ad" ] && [ "$_ad" -ge 1 ] 2>/dev/null && ARCHIVE_DAYS=$_ad
 fi
 
+# `--archive-all` (dsort's "Archive all now"): this run ignores the archive age
+# — after the normal sort pass, EVERY file in the live category folders is swept
+# into Archive/. User-triggered and interactive, so the young-file wait is
+# skipped too; anything still mid-download stays loose for the next normal pass.
+ARCHIVE_ALL=0
+[ "${1:-}" = "--archive-all" ] && ARCHIVE_ALL=1
+
 # Undo history. Each move is recorded as "old<TAB>new" to a .partial during the
 # run; if the run did work, those lines are appended to HISTORY_FILE prefixed
 # with a run stamp ("stamp<TAB>old<TAB>new"). The history is a stack: `dsort
@@ -558,6 +565,9 @@ scan() {
 # keep leaving the live tree, the live tree stays small and this stays cheap.
 archive_old() {
     local cat f rel base
+    # --archive-all drops the age filter: sweep everything, not just old files
+    local age=(-mtime +"$ARCHIVE_DAYS")
+    [ "$ARCHIVE_ALL" = 1 ] && age=()
     for cat in "${MANAGED_DIRS[@]}"; do
         [ -d "$DIR/$cat" ] || continue
         # process substitution (not a pipe) so ARCHIVE_COUNT survives the loop
@@ -567,7 +577,7 @@ archive_old() {
             case "$base" in '~$'*) continue ;; esac   # MS Office lock files — never archive junk
             rel=$(dirname "${f#"$DIR"/}")             # e.g. "Documents/PDFs"
             move_to "$f" "Archive/$rel" "archived"
-        done < <(find "$DIR/$cat" -type f -mtime +"$ARCHIVE_DAYS" ! -name '.*' ! -name '~$*' -print0)
+        done < <(find "$DIR/$cat" -type f ${age[@]+"${age[@]}"} ! -name '.*' ! -name '~$*' -print0)
     done
 }
 
@@ -583,9 +593,12 @@ notify() {
     rollup=$(printf '%s' "$SUMMARY" | sed '/^$/d' | sort | uniq -c | sort -rn | \
         awk '{ n=$1; $1=""; sub(/^[ \t]+/,""); printf "%s%d -> %s", (NR>1?", ":""), n, $0 }')
     if [ "$MOVE_COUNT" -gt 0 ] && [ "$ARCHIVE_COUNT" -gt 0 ]; then
-        body="$rollup - archived $ARCHIVE_COUNT old"
+        [ "$ARCHIVE_ALL" = 1 ] && body="$rollup - archived $ARCHIVE_COUNT" \
+                               || body="$rollup - archived $ARCHIVE_COUNT old"
     elif [ "$MOVE_COUNT" -gt 0 ]; then
         body="$rollup"
+    elif [ "$ARCHIVE_ALL" = 1 ]; then
+        body="Archived $ARCHIVE_COUNT file(s) to Archive/"
     else
         body="Archived $ARCHIVE_COUNT file(s) older than ${ARCHIVE_DAYS}d"
     fi
@@ -834,8 +847,9 @@ main() {
     : > "$UNDO_PARTIAL" 2>/dev/null              # fresh undo record for this run
     scan
     # a fresh download usually finishes within MIN_AGE: instead of leaving young
-    # files for the next timer pass, wait them out once and rescan
-    if [ "$YOUNG_SKIPPED" = 1 ]; then
+    # files for the next timer pass, wait them out once and rescan. Skipped for
+    # --archive-all: the user is sitting at the prompt, not waiting minutes.
+    if [ "$YOUNG_SKIPPED" = 1 ] && [ "$ARCHIVE_ALL" != 1 ]; then
         # Wait young files out once — but cap the in-process wait so a long grace
         # period (settable up to ~31 days) can't leave this launchd job sleeping for
         # hours. Anything still too fresh after the cap is picked up by the next

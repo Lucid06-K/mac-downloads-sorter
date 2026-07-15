@@ -9,6 +9,7 @@
 #   dsort on|off          enable/disable the sorter (persists across restarts)
 #   dsort status          one-shot text status
 #   dsort run             trigger a sort pass now
+#   dsort archive-all [-y]  sort loose files, then sweep everything into Archive/
 #   dsort log [n]         last n log lines (default 15)
 #   dsort notify on|off   toggle "Downloads sorted" notifications
 #   dsort cleannames on|off   toggle opt-in filename cleanup
@@ -618,14 +619,15 @@ describe_main() {
     case "$1" in
         0) echo "Master switch for the whole auto-sorter (persists across reboots)." ;;
         1) echo "Run a sort pass right now." ;;
-        2) echo "Dry run: show where loose files WOULD go. Moves nothing." ;;
-        3) echo "Revert changes — tick individual files or whole runs; repeat to step back." ;;
-        4) echo "File counts and sizes per category, plus last activity time." ;;
-        5) echo "Recent moves and archives, newest first." ;;
-        6) echo "Open Settings — schedule, archive age, and all the feature toggles." ;;
-        7) echo "Check GitHub for a newer version and install it (verified download)." ;;
-        8) echo "Detailed guide to every feature and how to use them." ;;
-        9) echo "Exit this menu — the sorter keeps running in the background." ;;
+        2) echo "Sort loose files, then move EVERYTHING in the sorted folders to Archive/." ;;
+        3) echo "Dry run: show where loose files WOULD go. Moves nothing." ;;
+        4) echo "Revert changes — tick individual files or whole runs; repeat to step back." ;;
+        5) echo "File counts and sizes per category, plus last activity time." ;;
+        6) echo "Recent moves and archives, newest first." ;;
+        7) echo "Open Settings — schedule, archive age, and all the feature toggles." ;;
+        8) echo "Check GitHub for a newer version and install it (verified download)." ;;
+        9) echo "Detailed guide to every feature and how to use them." ;;
+        10) echo "Exit this menu — the sorter keeps running in the background." ;;
     esac
 }
 describe_settings() {
@@ -780,15 +782,16 @@ _draw_body() {
         row 0 "$s_plain" "$s_col"
         printf '  %s\n' "$SEP"
         row 1 "Sort now"          "Sort now"
-        row 2 "Preview (dry run)" "Preview (dry run)"
-        row 3 "Undo"              "Undo"
-        row 4 "Stats"             "Stats"
-        row 5 "Activity log"      "Activity log"
+        row 2 "Archive all now"   "Archive all now"
+        row 3 "Preview (dry run)" "Preview (dry run)"
+        row 4 "Undo"              "Undo"
+        row 5 "Stats"             "Stats"
+        row 6 "Activity log"      "Activity log"
         printf '  %s\n' "$SEP"
-        row 6 "Settings ▸"          "${BLD}Settings ▸${R}"
-        row 7 "Check for updates"   "Check for updates"
-        row 8 "Help & guide"        "Help & guide"
-        row 9 "Close menu"          "Close menu"
+        row 7 "Settings ▸"          "${BLD}Settings ▸${R}"
+        row 8 "Check for updates"   "Check for updates"
+        row 9 "Help & guide"        "Help & guide"
+        row 10 "Close menu"         "Close menu"
         printf '  %s\n' "$SEP"
         printf '  %s➜ %s%s\n' "$DIM" "$(describe_main "$focus")" "$R"
         printf '  %s\n' "${GRN}${MSG}${R}"
@@ -1130,6 +1133,64 @@ do_run() {
     fi
 }
 
+# --- "Archive all now" — one-shot sweep of everything into Archive/ ---------
+# Sorts loose files first, then moves EVERY file in the live category folders
+# into Archive/ (mirrored structure). Large Files/ and Duplicates/ are holding
+# pens the archive sweep never touches, so they stay put — same as the normal
+# aged sweep. Recorded in the undo history like any other run.
+
+# Upper bound on what a sweep could touch: loose top-level files plus every
+# file in the live category folders. Subshell-sources the sorter for its
+# MANAGED_DIRS/DIR (same trick as run_stats); loose files may still be
+# excluded by rules at sort time, so this is a ceiling, not a promise.
+_archive_all_count() (
+    # shellcheck source=/dev/null
+    source "$SORTER" >/dev/null 2>&1 || { echo 0; exit 0; }
+    local d n=0 c
+    for d in "${MANAGED_DIRS[@]}"; do
+        [ -d "$DIR/$d" ] || continue
+        c=$(find "$DIR/$d" -type f ! -name '.*' ! -name '~$*' 2>/dev/null | wc -l | tr -d ' ')
+        n=$((n + c))
+    done
+    c=$(find "$DIR" -maxdepth 1 -type f ! -name '.*' ! -name '~$*' 2>/dev/null | wc -l | tr -d ' ')
+    echo $((n + c))
+)
+
+# Run the sweep directly (launchd kickstart can't carry the flag) and report
+# what happened from the log delta: AA_SORTED sorted, AA_ARCHIVED archived.
+_archive_all_run() {
+    local before
+    before=$(wc -l < "$LOG" 2>/dev/null || echo 0)
+    "$SORTER" --archive-all
+    AA_SORTED=$(tail -n "+$((before + 1))" "$LOG" 2>/dev/null | grep -c ' moved: ')
+    AA_ARCHIVED=$(tail -n "+$((before + 1))" "$LOG" 2>/dev/null | grep -c ' archived: ')
+}
+
+do_archive_all() {
+    local n key
+    n=$(_archive_all_count)
+    printf '\033[H\033[2J'
+    printf '\n  %sArchive all now%s\n\n' "$BLD" "$R"
+    if [ "${n:-0}" -eq 0 ]; then
+        printf '  Nothing to archive — no loose files and the category folders are empty.\n'
+        printf '\n  %spress any key to return%s' "$DIM" "$R"; IFS= read -r -s -n 1 _ 2>/dev/null
+        return
+    fi
+    printf '  Sorts any loose files first, then moves %severy%s file in the sorted\n' "$BLD" "$R"
+    printf '  category folders into Archive/ (same folder structure).\n'
+    printf '  Large Files/ and Duplicates/ stay put. Reversible via Undo.\n\n'
+    printf '  Archive up to %s file(s) now? [y/N] ' "$n"
+    IFS= read -r -s -n 1 key 2>/dev/null
+    case "$key" in
+        y|Y)
+            printf 'y\n\n  %sworking…%s\n' "$DIM" "$R"
+            _archive_all_run
+            MSG="Archive all: sorted $AA_SORTED, archived $AA_ARCHIVED file(s) → Archive/"
+            ;;
+        *)  MSG="Archive all cancelled — nothing moved" ;;
+    esac
+}
+
 # activity log view: newest first, grouped under Today/Yesterday/date headers,
 # "HH:MM  name  → Dest" columns; non-move lines (mv/osascript errors) in yellow
 do_log() {
@@ -1399,6 +1460,7 @@ EOF
        dsort version            dsort update
 
        dsort run                sort now
+       dsort archive-all [-y]   sort, then sweep EVERYTHING into Archive/
        dsort preview            dry run (no moves)
        dsort undo               move the last run's files back
        dsort find <name>        where did a download get filed?
@@ -1884,14 +1946,15 @@ activate() {
         case "$focus" in
             0) toggle_sorter ;;
             1) do_run ;;
-            2) do_preview ;;
-            3) do_undo ;;
-            4) do_stats ;;
-            5) do_log ;;
-            6) SCREEN=settings; focus=0 ;;
-            7) do_update ;;
-            8) do_help ;;
-            9) QUIT=1 ;;
+            2) do_archive_all ;;
+            3) do_preview ;;
+            4) do_undo ;;
+            5) do_stats ;;
+            6) do_log ;;
+            7) SCREEN=settings; focus=0 ;;
+            8) do_update ;;
+            9) do_help ;;
+            10) QUIT=1 ;;
         esac
     fi
 }
@@ -1904,7 +1967,7 @@ ui_main() {
     printf '\033[?25l'
     trap 'printf "\033[?1049l\033[?25h\033[0m"' EXIT
     while [ "$QUIT" -eq 0 ]; do
-        [ "$SCREEN" = settings ] && NROWS=21 || NROWS=10
+        [ "$SCREEN" = settings ] && NROWS=21 || NROWS=11
         draw
         MSG=""
         key=$(read_key) || break
@@ -1915,7 +1978,8 @@ ui_main() {
             [0-9])  # number shortcut: main menu only (Settings has too many rows
                     # for 1-9,0 to be meaningful, so it uses arrows/enter only)
                     if [ "$SCREEN" != settings ]; then
-                        if [ "$key" = 0 ]; then idx=9; else idx=$((key - 1)); fi
+                        # 0 always means the last row (Close menu), wherever it sits
+                        if [ "$key" = 0 ]; then idx=$((NROWS - 1)); else idx=$((key - 1)); fi
                         if [ "$idx" -lt "$NROWS" ]; then focus=$idx; activate; fi
                     fi
                     continue ;;
@@ -2054,6 +2118,18 @@ case "$1" in
         else
             echo "Recent activity: $(get_recent_count) line(s) on the menu (default $RECOMMENDED_RECENT)"
         fi ;;
+    archive-all|archiveall)
+        n=$(_archive_all_count)
+        if [ "${n:-0}" -eq 0 ]; then
+            echo "Nothing to archive — no loose files and the category folders are empty."; exit 0
+        fi
+        if [ "${2:-}" != "-y" ] && [ "${2:-}" != "--yes" ]; then
+            printf 'Sort loose files, then move up to %s file(s) into ~/Downloads/Archive/. Proceed? [y/N] ' "$n"
+            IFS= read -r ans
+            case "$ans" in y|Y|yes|Yes|YES) ;; *) echo "Cancelled — nothing moved."; exit 0 ;; esac
+        fi
+        _archive_all_run
+        echo "Done — sorted $AA_SORTED, archived $AA_ARCHIVED file(s) into ~/Downloads/Archive/.  (dsort undo reverts)" ;;
     preview)
         run_preview ;;
     undo)
@@ -2122,6 +2198,7 @@ Usage: dsort <command>   (bare = interactive UI)
   on | off            enable/disable the sorter
   status              text status of every setting
   run                 trigger a sort pass now
+  archive-all [-y]    sort loose files, then sweep EVERYTHING into Archive/
   preview             dry run — show where loose files would go (no moves)
   undo                move the last run's files back
   stats               file counts / sizes per category
