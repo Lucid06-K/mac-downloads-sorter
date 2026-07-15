@@ -102,6 +102,19 @@ else
     info "DownloadsNotifier.app already present and current — keeping it"
 fi
 
+# Both helpers are headless: mark them background-only (LSUIElement) so they
+# don't appear in the Dock while running. Idempotent — bundles that already
+# have the flag are left untouched. Patching an existing bundle changes its
+# code hash, so macOS may re-ask once for that app's permission on next run.
+hide_from_dock() {
+    /usr/libexec/PlistBuddy -c "Print :LSUIElement" "$1/Contents/Info.plist" >/dev/null 2>&1 && return 0
+    /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$1/Contents/Info.plist" 2>/dev/null || return 0
+    codesign --force --sign - "$1" 2>/dev/null || true
+    ok "$(basename "$1") hidden from the Dock while it runs"
+}
+hide_from_dock "$ORG_APP"
+hide_from_dock "$NOTIFY_APP"
+
 # 2.5) migrate any prior install & preserve the user's schedule -------------
 # Older installs (and pre-rename builds) used a different launchd label. If we
 # ignore them we end up with TWO agents both watching ~/Downloads and racing on
