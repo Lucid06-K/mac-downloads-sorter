@@ -62,14 +62,17 @@ fi
 # (DSORT_BODY / DSORT_TITLE). An osacompile applet's binary does NOT receive
 # command-line argv, so the sorter passes the message through the environment;
 # argv is kept only as a fallback for `osascript`-style invocation.
+# Read the vars via `do shell script` (which decodes UTF-8), NOT `system
+# attribute` (which reads raw bytes as MacRoman and mangles — ✓ and any
+# non-ASCII filename into "‚Äî"-style artifacts).
 NOTIFY_AS='on run argv
     set theTitle to "Downloads sorted"
     set theBody to ""
     try
-        set theBody to (system attribute "DSORT_BODY")
+        set theBody to (do shell script "printf \"%s\" \"$DSORT_BODY\"")
     end try
     try
-        set tt to (system attribute "DSORT_TITLE")
+        set tt to (do shell script "printf \"%s\" \"$DSORT_TITLE\"")
         if tt is not "" then set theTitle to tt
     end try
     if theBody is "" then
@@ -87,10 +90,11 @@ if [ ! -d "$NOTIFY_APP" ]; then
         "$NOTIFY_APP/Contents/Info.plist" 2>/dev/null || true
     codesign --force --sign - "$NOTIFY_APP" 2>/dev/null || true
     ok "Built DownloadsNotifier.app (notifications)"
-elif ! osadecompile "$NOTIFY_APP/Contents/Resources/Scripts/main.scpt" 2>/dev/null | grep -q DSORT_BODY; then
-    # existing app has the old script that couldn't receive the message body —
-    # refresh just the script in place, keeping the bundle id so the macOS
-    # notification permission is preserved.
+elif ! osadecompile "$NOTIFY_APP/Contents/Resources/Scripts/main.scpt" 2>/dev/null | grep -q 'do shell script'; then
+    # existing app has an old script — either it couldn't receive the message
+    # body at all, or it read the env vars with `system attribute` (MacRoman
+    # mojibake on any non-ASCII character). Refresh just the script in place,
+    # keeping the bundle id so the macOS notification permission is preserved.
     TMP_SCPT="$(mktemp -d)/main.scpt"
     if osacompile -o "$TMP_SCPT" -e "$NOTIFY_AS" 2>/dev/null; then
         cp "$TMP_SCPT" "$NOTIFY_APP/Contents/Resources/Scripts/main.scpt"
